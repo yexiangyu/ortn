@@ -290,7 +290,9 @@ pub struct SessionBuilder {
     intra_threads: u16,
     #[default(1)]
     inter_threads: u16,
-    #[default(-1)]
+    use_tensor_rt: bool,
+    use_cuda: bool,
+    #[default(0)]
     cuda_device_id: i32,
     #[default(0)]
     cuda_mem_limit: usize,
@@ -314,8 +316,22 @@ impl SessionBuilder {
         self
     }
 
-    pub fn with_cuda(mut self, device_id: i32) -> Self {
+    pub fn with_cuda_deivice(mut self, device_id: i32) -> Self {
         self.cuda_device_id = device_id;
+        self
+    }
+
+    pub fn with_cuda_mem_limit(mut self, limit: usize) -> Self {
+        self.cuda_mem_limit = limit;
+        self
+    }
+    pub fn with_use_cuda(mut self, use_cuda: bool) -> Self {
+        self.use_cuda = use_cuda;
+        self
+    }
+
+    pub fn with_use_tensor_rt(mut self, use_tensor_rt: bool) -> Self {
+        self.use_tensor_rt = use_tensor_rt;
         self
     }
 
@@ -334,8 +350,11 @@ impl SessionBuilder {
                 .as_ref()
                 .expect("failed to get CreateSessionOptions")(&mut option)
         })?;
-        if self.cuda_device_id >= 0 {
+
+        if self.use_cuda {
+
             let mut cuda_option = null_mut();
+
             rc(unsafe {
                 API.CreateCUDAProviderOptions
                     .as_ref()
@@ -343,6 +362,7 @@ impl SessionBuilder {
                     &mut cuda_option
                 )
             })?;
+
 
             rc(unsafe {
                 API.UpdateCUDAProviderOptions
@@ -401,6 +421,30 @@ impl SessionBuilder {
                 option, self.graph_optimization_level
             )
         })?;
+
+        if self.use_tensor_rt
+        {
+            let mut tensor_rt_option = null_mut();
+
+            rc(unsafe {
+                API.CreateTensorRTProviderOptions
+                    .as_ref()
+                    .expect("failed to get CreateTensorRTProviderOptions")(
+                    &mut tensor_rt_option
+                )
+            })?;
+
+            rc(unsafe {
+                API.UpdateTensorRTProviderOptions
+                    .as_ref()
+                    .expect("failed to get UpdateTensorRTProviderOptions")(
+                    tensor_rt_option,
+                    &CString::new("device_id")?.as_ptr(),
+                    &CString::new(self.cuda_device_id.to_string())?.as_ptr(),
+                    1,
+                )
+            })?;
+        }
 
         let _env = self.env.unwrap_or_else(|| ENV.clone());
 

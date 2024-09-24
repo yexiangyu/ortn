@@ -35,6 +35,8 @@ fn test_demo_code() -> error::Result<()> {
                 .with_level(OrtLoggingLevel::ORT_LOGGING_LEVEL_VERBOSE)
                 .build()?,
         )
+        // use cuda
+        .with_use_tensor_rt(true)
         // disable all optimization
         .with_graph_optimization_level(GraphOptimizationLevel::ORT_DISABLE_ALL)
         // set session intra threads to 4

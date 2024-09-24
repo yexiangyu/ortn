@@ -43,7 +43,11 @@ fn main() {
     let triplet = format!("{}-{}-{}", TARGET_ARCH, TARGET_OS, ACCL);
 
     let bind_output = triplet + ".rs";
-    let header = format!("{}/onnxruntime/onnxruntime_c_api.h", ort_inc_dir);
+
+    let mut header = format!("{}/onnxruntime/onnxruntime_c_api.h", ort_inc_dir);
+    if !std::path::PathBuf::from(&header).exists() {
+        header = format!("{}/onnxruntime_c_api.h", ort_inc_dir);
+    }
 
     #[cfg(all(target_os = "macos", feature = "cuda"))]
     {

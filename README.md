@@ -18,9 +18,9 @@ Yet another minimum `rust` binding for `onnxruntime` `c_api`.
 
 |   OS   | onnxuntime<br />version |  Arch  | CPU | CUDA | TensorRT | CANN |
 | :-----: | :---------------------: | :-----: | :--: | :--: | :------: | :--: |
-|   mac   |         1.17.1         | aarch64 |  ✅  | n/a |   n/a   | n/a |
+|   mac   |         1.17.1         | aarch64  |  ✅  | n/a |   n/a   | n/a |
 |   mac   |         1.17.1         | intel64 | TODO | n/a |   n/a   | n/a |
-|  linux  |          TODO          | intel64 | TODO | TODO |   TODO   | TODO |
+|  linux  |         1.19.2         | intel64 | ✅  | ✅  |   ✅   | n/a |
 | windows |          TODO          | intel64 | TODO | TODO |   TODO   | TODO |
 
 ## Getting Started
