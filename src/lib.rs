@@ -16,10 +16,13 @@ pub mod prelude {
 
 #[allow(unused)]
 #[cfg(test)]
+#[test]
 fn test_demo_code() -> error::Result<()> {
+
     use ndarray::Array4;
     use ndarray_rand::{rand_distr::Uniform, RandomExt};
     use prelude::*;
+    let _ = dotenv::dotenv();
     std::env::set_var("RUST_LOG", "trace");
 
     let _ = tracing_subscriber::fmt::try_init();

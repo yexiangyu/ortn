@@ -10,6 +10,7 @@ ndarray-rand = "0.15.0"
 tracing-subscriber = "0.3.18"
 
 [dependencies]
+dotenv = "0.15.0"
 itertools = "0.13.0"
 lazy_static = "1.5.0"
 ndarray = "0.16.1"

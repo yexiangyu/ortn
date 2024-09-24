@@ -16,12 +16,12 @@ Yet another minimum `rust` binding for `onnxruntime` `c_api`.
 
 ## Supported Matrix
 
-| OS      | version | Arch    | CPU  | CUDA | TensorRT | CANN |
-| ------- | ------- | ------- | ---- | ---- | -------- | ---- |
-| mac     | 1.17.1  | aarch64 | ✅   | n/a  | n/a      | n/a  |
-| mac     | 1.17.1  | intel64 | TODO | n/a  | n/a      | n/a  |
-| linux   | TODO    | intel64 | TODO | TODO | TODO     | TODO |
-| windows | TODO    | intel64 | TODO | TODO | TODO     | TODO |
+|   OS   | onnxuntime<br />version |  Arch  | CPU | CUDA | TensorRT | CANN |
+| :-----: | :---------------------: | :-----: | :--: | :--: | :------: | :--: |
+|   mac   |         1.17.1         | aarch64 |  ✅  | n/a |   n/a   | n/a |
+|   mac   |         1.17.1         | intel64 | TODO | n/a |   n/a   | n/a |
+|  linux  |          TODO          | intel64 | TODO | TODO |   TODO   | TODO |
+| windows |          TODO          | intel64 | TODO | TODO |   TODO   | TODO |
 
 ## Getting Started
 
@@ -82,4 +82,5 @@ let output = Session::builder()
     .to_owned();
 
 tracing::info!(?output);
+Result::Ok(())
 ```

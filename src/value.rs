@@ -10,6 +10,7 @@ use crate::error::*;
 use crate::session::{Session, TensorShapeInfo};
 use ndarray::{ArrayView, ArrayViewD, Dimension};
 
+/// all OrtValue type should implement this trait
 pub trait ValueTrait {
     fn inner(&self) -> *mut ffi::OrtValue;
 
