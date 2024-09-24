@@ -5,7 +5,8 @@ use std::sync::Arc;
 use crate::api::API;
 use crate::environment::Environment;
 use crate::error::*;
-use crate::value::{ValueOutput, ValueTrait};
+use crate::iobinding::IoBinding;
+use crate::value::{ValueOutput, ValueTrait, AllocatorDefault};
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use ortn_sys as ffi;
@@ -29,7 +30,7 @@ pub struct TensorShapeInfo {
 
 #[derive(Debug)]
 pub struct Session {
-    inner: *mut ffi::OrtSession,
+    pub inner: *mut ffi::OrtSession,
     pub inputs: Vec<TensorShapeInfo>,
     pub outputs: Vec<TensorShapeInfo>,
     _env: Arc<Environment>,
@@ -53,7 +54,17 @@ impl Session {
     pub fn builder() -> SessionBuilder {
         SessionBuilder::default()
     }
-    
+
+    pub fn run_with_iobinding(&self, io: &mut IoBinding) -> Result<()>
+    {
+        rc(unsafe {
+            API.RunWithBinding
+                .as_ref()
+                .expect("failed to get RunWithBinding")(self.inner, null(), io.inner)
+        })?;
+        Ok(())
+    }
+
     pub fn run<T>(&self, inputs: impl AsRef<[T]>) -> Result<Vec<ValueOutput>>
     where
         T: ValueTrait,
@@ -92,13 +103,7 @@ impl Session {
                 .expect("failed to get SessionGetInputCount")(self.inner, &mut count)
         })?;
 
-        let mut allocator = null_mut();
-
-        rc(unsafe {
-            API.GetAllocatorWithDefaultOptions
-                .as_ref()
-                .expect("failed to get GetAllocatorWithDefaultOptions")(&mut allocator)
-        })?;
+        let allocator = AllocatorDefault::new()?;
 
         for index in 0..count {
             let mut name_ = null_mut();
@@ -106,7 +111,7 @@ impl Session {
                 API.SessionGetInputName
                     .as_ref()
                     .expect("failed to get SessionGetInputName")(
-                    self.inner, index, allocator, &mut name_,
+                    self.inner, index, allocator.inner, &mut name_,
                 )
             })?;
 
@@ -116,7 +121,7 @@ impl Session {
                 API.AllocatorFree
                     .as_ref()
                     .expect("failed to get AllocatorFree")(
-                    allocator, name_ as *mut _
+                    allocator.inner, name_ as *mut _
                 )
             })?;
 
@@ -191,13 +196,9 @@ impl Session {
                 .expect("failed to get SessionGetOutputCount")(self.inner, &mut count)
         })?;
 
-        let mut allocator = null_mut();
+        let allocator = AllocatorDefault::new()?;
 
-        rc(unsafe {
-            API.GetAllocatorWithDefaultOptions
-                .as_ref()
-                .expect("failed to get GetAllocatorWithDefaultOptions")(&mut allocator)
-        })?;
+
 
         for index in 0..count {
             let mut name_ = null_mut();
@@ -205,7 +206,7 @@ impl Session {
                 API.SessionGetOutputName
                     .as_ref()
                     .expect("failed to get SessionGetOutputName")(
-                    self.inner, index, allocator, &mut name_,
+                    self.inner, index, allocator.inner, &mut name_,
                 )
             })?;
 
@@ -215,7 +216,7 @@ impl Session {
                 API.AllocatorFree
                     .as_ref()
                     .expect("failed to get AllocatorFree")(
-                    allocator, name_ as *mut _
+                    allocator.inner, name_ as *mut _
                 )
             })?;
 
@@ -325,6 +326,7 @@ impl SessionBuilder {
         self.cuda_mem_limit = limit;
         self
     }
+
     pub fn with_use_cuda(mut self, use_cuda: bool) -> Self {
         self.use_cuda = use_cuda;
         self
@@ -335,10 +337,7 @@ impl SessionBuilder {
         self
     }
 
-    pub fn with_graph_optimization_level(
-        mut self,
-        level: ffi::GraphOptimizationLevel,
-    ) -> Self {
+    pub fn with_graph_optimization_level(mut self, level: ffi::GraphOptimizationLevel) -> Self {
         self.graph_optimization_level = level;
         self
     }
@@ -352,7 +351,6 @@ impl SessionBuilder {
         })?;
 
         if self.use_cuda {
-
             let mut cuda_option = null_mut();
 
             rc(unsafe {
@@ -362,7 +360,6 @@ impl SessionBuilder {
                     &mut cuda_option
                 )
             })?;
-
 
             rc(unsafe {
                 API.UpdateCUDAProviderOptions
@@ -396,6 +393,12 @@ impl SessionBuilder {
                     cuda_option,
                 )
             })?;
+
+            unsafe {
+                API.ReleaseCUDAProviderOptions
+                    .as_ref()
+                    .expect("failed to get ReleaseCUDAProviderOptions")(cuda_option);
+            }
         }
 
         rc(unsafe {
@@ -418,12 +421,12 @@ impl SessionBuilder {
             API.SetSessionGraphOptimizationLevel
                 .as_ref()
                 .expect("failed to get SetSessionGraphOptimizationLevel")(
-                option, self.graph_optimization_level
+                option,
+                self.graph_optimization_level,
             )
         })?;
 
-        if self.use_tensor_rt
-        {
+        if self.use_tensor_rt {
             let mut tensor_rt_option = null_mut();
 
             rc(unsafe {
@@ -444,6 +447,14 @@ impl SessionBuilder {
                     1,
                 )
             })?;
+
+            unsafe {
+                API.ReleaseTensorRTProviderOptions
+                    .as_ref()
+                    .expect("failed to get ReleaseTensorRTProviderOptions")(
+                    tensor_rt_option
+                );
+            }
         }
 
         let _env = self.env.unwrap_or_else(|| ENV.clone());

@@ -4,7 +4,7 @@
 #![allow(clippy::all)]
 
 #[cfg(all(target_os= "macos", target_arch = "aarch64"))]
-include!("ffi/aarch64-macos-cpu.rs");
+include!("ffi/aarch64-macos.rs");
 
 #[cfg(all(target_os= "linux", target_arch = "x86_64"))]
-include!("ffi/x86_64-linux-cpu.rs");
+include!("ffi/x86_64-linux.rs");

@@ -9,6 +9,5 @@ bindgen = "0.70.1"
 
 [features]
 bindgen = []
-cuda = []
 
 [dependencies]

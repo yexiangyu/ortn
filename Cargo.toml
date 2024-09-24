@@ -5,15 +5,18 @@ name = "ortn"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+
 [dev-dependencies]
-ndarray-rand = "0.15.0"
+ndarray-rand = "*"
 tracing-subscriber = "0.3.18"
 
 [dependencies]
 dotenv = "0.15.0"
 itertools = "0.13.0"
 lazy_static = "1.5.0"
-ndarray = "0.16.1"
+ndarray = "*"
 ortn-sys = { path = "./ortn-sys" }
 smart-default = "0.7.1"
 thiserror = "1.0.64"

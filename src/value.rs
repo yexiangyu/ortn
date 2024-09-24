@@ -2,8 +2,10 @@ use std::ffi::{c_void, CString};
 use std::marker::PhantomData;
 use std::ptr::null_mut;
 
+
 use itertools::Itertools;
 use ortn_sys::{self as ffi, ONNXTensorElementDataType};
+use tracing::*;
 
 use crate::api::API;
 use crate::error::*;
@@ -86,6 +88,7 @@ pub trait ValueTrait {
         let dims = ndarray::IxDyn(&dims);
         Ok(unsafe { ArrayViewD::from_shape_ptr(dims, ptr) })
     }
+
 }
 
 /// value that created from extern data as reference
@@ -174,6 +177,140 @@ impl<'a> ValueOutput<'a> {
         Self {
             inner,
             _session: PhantomData,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct MemoryInfo {
+    pub inner: *mut ffi::OrtMemoryInfo,
+}
+
+impl MemoryInfo {
+    pub fn new_cpu() -> Result<Self> {
+        let mut inner = null_mut();
+        rc(unsafe {
+            API.CreateCpuMemoryInfo
+                .as_ref()
+                .expect("failed to get CreateCpuMemoryInfo")(
+                ffi::OrtAllocatorType::OrtArenaAllocator,
+                ffi::OrtMemType::OrtMemTypeDefault,
+                &mut inner,
+            )
+        })?;
+        Ok(MemoryInfo { inner })
+    }
+
+    pub fn new_cuda(device_id: u32) -> Result<Self> {
+        let name = CString::new("CUDA")?;
+        let mut inner = null_mut();
+        rc(unsafe {
+            API.CreateMemoryInfo
+                .as_ref()
+                .expect("failed to get CreateMemoryInfo")(
+                name.as_ptr(),
+                ffi::OrtAllocatorType::OrtDeviceAllocator,
+                device_id as i32,
+                ffi::OrtMemType::OrtMemTypeDefault,
+                &mut inner,
+            )
+        })?;
+        Ok(MemoryInfo { inner })
+    }
+}
+
+impl Drop for MemoryInfo {
+    fn drop(&mut self) {
+        trace!("dropping {:?}", self);
+        unsafe {
+            API.ReleaseMemoryInfo
+                .as_ref()
+                .expect("failed to get ReleaseMemoryInfo")(self.inner);
+        }
+    }
+}
+
+pub trait AllocatorTrait: std::fmt::Debug {
+    fn inner(&self) -> *mut ffi::OrtAllocator;
+}
+
+#[derive(Debug)]
+pub struct AllocatorDefault {
+    pub inner: *mut ffi::OrtAllocator,
+}
+
+impl AllocatorTrait for AllocatorDefault {
+    fn inner(&self) -> *mut ffi::OrtAllocator {
+        self.inner
+    }
+}
+
+impl Drop for AllocatorDefault {
+    fn drop(&mut self) {
+        trace!("dropping {:?}", self);
+    }
+}
+
+impl AllocatorDefault {
+    pub fn new() -> Result<Self> {
+        let mut inner = null_mut();
+        rc(unsafe {
+            API.GetAllocatorWithDefaultOptions
+                .as_ref()
+                .expect("failed to get GetAllocatorWithDefaultOptions")(&mut inner)
+        })?;
+        Ok(AllocatorDefault { inner })
+    }
+}
+
+
+#[derive(Debug)]
+pub struct AllocatorSession<'a> {
+    pub inner: *mut ffi::OrtAllocator,
+    pub session: &'a Session,
+}
+
+impl <'a> AllocatorSession<'a> {
+
+    pub fn new(memory_info: &MemoryInfo, session: &'a Session) -> Result<Self> {
+        let mut inner = null_mut();
+        rc(unsafe {
+            API.CreateAllocator
+                .as_ref()
+                .expect("failed to get CreateAllocator")(session.inner, memory_info.inner, &mut inner)
+        })?;
+        Ok(AllocatorSession { inner, session })
+    }
+}
+
+impl Drop for AllocatorSession<'_> {
+    fn drop(&mut self) {
+        trace!("dropping {:?}", self);
+        unsafe {
+            API.ReleaseAllocator
+                .as_ref()
+                .expect("failed to get ReleaseAllocator")(self.inner);
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct ValueAllocated<'a,  A> where A: AllocatorTrait {
+    pub inner: *mut ffi::OrtValue,
+    pub allocator: &'a A,
+}
+
+impl <'a, A> ValueTrait for ValueAllocated<'a, A> where A: AllocatorTrait {
+    fn inner(&self) -> *mut ffi::OrtValue {
+        self.inner
+    }
+}
+
+impl <'a, A> Drop for ValueAllocated<'a, A> where A: AllocatorTrait {
+    fn drop(&mut self) {
+        trace!("dropping {:?}", self);
+        unsafe {
+            API.AllocatorFree.as_ref().expect("failed to get AllocatorFree")(self.allocator.inner(), self.inner as *mut _);
         }
     }
 }
