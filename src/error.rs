@@ -9,7 +9,7 @@ pub enum Error {
     ApiError {
         code: ffi::OrtErrorCode,
         message: String,
-    }
+    },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

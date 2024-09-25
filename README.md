@@ -7,30 +7,29 @@ Yet another minimum `rust` binding for `onnxruntime` `c_api`.
 - only shared library (`onnxruntime.dll, libonnxruntime.[so|dyn])` supported
 - suppose to work with specified onnxruntime version on different platform only.
 
-## TODO
 
-- `IOBinding`
-- More input data type like `f16`, `i64` ...
-- More wrapped value type like `opencv::Mat`
-- More runtime provider
-
-## Supported Matrix
+## Test Matrix
 
 |   OS   | onnxuntime<br />version |  Arch  | CPU | CUDA | TensorRT | CANN |
 | :-----: | :---------------------: | :-----: | :--: | :--: | :------: | :--: |
-|   mac   |         1.17.1         | aarch64  |  ✅  | n/a |   n/a   | n/a |
-|   mac   |         1.17.1         | intel64 | TODO | n/a |   n/a   | n/a |
-|  linux  |         1.19.2         | intel64 | ✅  | ✅  |   ✅   | n/a |
+|   mac   |         1.19.2         | aarch64 |  ✅  | n/a |   n/a   | n/a |
+|   mac   |         1.19.2         | intel64 |  ✅  | n/a |   n/a   | n/a |
+|  linux  |         1.19.2         | intel64 |  ✅  |  ✅  |    ✅    | n/a |
 | windows |          TODO          | intel64 | TODO | TODO |   TODO   | TODO |
 
 ## Getting Started
 
-1. before start everything, setup environment variable to help `ortn` to find `header` or `libraries` needed.
+1. please download [`onnxruntime`](https://github.com/microsoft/onnxruntime) first, unzip, or build it from source. Binary downloaded from [release page](https://github.com/microsoft/onnxruntime/releases) is not signed, take care of it.
 
-- `ORT_LIB_DIR`: folder where `libonnxruntime.[so|dylib]` located
+2. before start everything, setup environment variable to help `ortn` to find `header` or `libraries` needed.
+
+- `ORT_LIB_DIR`: folder where `libonnxruntime.[so|dylib]` or `onnxruntime.dll` located
 - `ORT_INC_DIR`: folder where header file: `onnxruntime/onnxruntime_c_api.h` located
+- `DYLD_LIBRARY_PATH`: (mac only) folder where `libonnxruntime.dylib` located
+- `LD_LIBRARY_PATH`: (linux only) folder where `libonnxruntime.so` located
+- `PATH`: (windows only) folder where `onnxruntime.dll` located
 
-2. build environment, build session, run session
+3. build environment, build session, run session
 
 ```rust
 use ndarray::Array4;
@@ -84,3 +83,27 @@ let output = Session::builder()
 tracing::info!(?output);
 Result::Ok(())
 ```
+
+## Update bindings
+In case bindings need to be update, just:
+
+1. git clone this repo
+```bash
+git clone https://github.com/yexiangyu/ortn
+```
+2. export environment variable
+```bash
+export ORT_LIB_DIR=/path/to/onnxruntime/lib
+export ORT_INC_DIR=/path/to/onnxruntime/include
+```
+3. build bindings with feature `bindgen` enabled
+```bash
+cargo build --features bindgen
+```
+
+## TODO
+
+- More input data type like `f16`, `i64` ...
+- More wrapped value type like `opencv::Mat`
+- More runtime provider
+- `onnxruntime-agi`

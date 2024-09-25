@@ -12,6 +12,8 @@ default = []
 ndarray-rand = "*"
 tracing-subscriber = "0.3.18"
 
+
+
 [dependencies]
 dotenv = "0.15.0"
 itertools = "0.13.0"

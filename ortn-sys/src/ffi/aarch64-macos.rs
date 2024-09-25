@@ -735,7 +735,7 @@ pub const EXIT_SUCCESS: u32 = 0;
 pub const RAND_MAX: u32 = 2147483647;
 pub const _USE_FORTIFY_LEVEL: u32 = 2;
 pub const __HAS_FIXED_CHK_PROTOTYPES: u32 = 1;
-pub const ORT_API_VERSION: u32 = 17;
+pub const ORT_API_VERSION: u32 = 19;
 pub type int_least8_t = i8;
 pub type int_least16_t = i16;
 pub type int_least32_t = i32;
@@ -3635,6 +3635,8 @@ pub enum ONNXTensorElementDataType {
     ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT8E4M3FNUZ = 18,
     ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT8E5M2 = 19,
     ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT8E5M2FNUZ = 20,
+    ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT4 = 21,
+    ONNX_TENSOR_ELEMENT_DATA_TYPE_INT4 = 22,
 }
 #[repr(u32)]
 #[non_exhaustive]
@@ -3865,16 +3867,22 @@ pub struct OrtAllocator {
     pub Info: ::std::option::Option<
         unsafe extern "C" fn(this_: *const OrtAllocator) -> *const OrtMemoryInfo,
     >,
+    #[doc = "< Returns a pointer to an allocated block of `size` bytes"]
+    pub Reserve: ::std::option::Option<
+        unsafe extern "C" fn(this_: *mut OrtAllocator, size: usize) -> *mut ::std::os::raw::c_void,
+    >,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of OrtAllocator"][::std::mem::size_of::<OrtAllocator>() - 32usize];
+    ["Size of OrtAllocator"][::std::mem::size_of::<OrtAllocator>() - 40usize];
     ["Alignment of OrtAllocator"][::std::mem::align_of::<OrtAllocator>() - 8usize];
     ["Offset of field: OrtAllocator::version"]
         [::std::mem::offset_of!(OrtAllocator, version) - 0usize];
     ["Offset of field: OrtAllocator::Alloc"][::std::mem::offset_of!(OrtAllocator, Alloc) - 8usize];
     ["Offset of field: OrtAllocator::Free"][::std::mem::offset_of!(OrtAllocator, Free) - 16usize];
     ["Offset of field: OrtAllocator::Info"][::std::mem::offset_of!(OrtAllocator, Info) - 24usize];
+    ["Offset of field: OrtAllocator::Reserve"]
+        [::std::mem::offset_of!(OrtAllocator, Reserve) - 32usize];
 };
 pub type OrtLoggingFunction = ::std::option::Option<
     unsafe extern "C" fn(
@@ -3987,9 +3995,9 @@ pub struct OrtCUDAProviderOptions {
     pub user_compute_stream: *mut ::std::os::raw::c_void,
     #[doc = " \\brief CUDA memory arena configuration parameters"]
     pub default_memory_arena_cfg: *mut OrtArenaCfg,
-    #[doc = " \\brief Enable TunableOp for using.\n   Set it to 1/0 to enable/disable TunableOp. Otherwise, it is disabled by default.\n   This option can be overriden by environment variable ORT_CUDA_TUNABLE_OP_ENABLE."]
+    #[doc = " \\brief Enable TunableOp for using.\n   Set it to 1/0 to enable/disable TunableOp. Otherwise, it is disabled by default.\n   This option can be overridden by environment variable ORT_CUDA_TUNABLE_OP_ENABLE."]
     pub tunable_op_enable: ::std::os::raw::c_int,
-    #[doc = " \\brief Enable TunableOp for tuning.\n   Set it to 1/0 to enable/disable TunableOp tuning. Otherwise, it is disabled by default.\n   This option can be overriden by environment variable ORT_CUDA_TUNABLE_OP_TUNING_ENABLE."]
+    #[doc = " \\brief Enable TunableOp for tuning.\n   Set it to 1/0 to enable/disable TunableOp tuning. Otherwise, it is disabled by default.\n   This option can be overridden by environment variable ORT_CUDA_TUNABLE_OP_TUNING_ENABLE."]
     pub tunable_op_tuning_enable: ::std::os::raw::c_int,
     #[doc = " \\brief Max tuning duration time limit for each instance of TunableOp.\n   Defaults to 0 to disable the limit."]
     pub tunable_op_max_tuning_duration_ms: ::std::os::raw::c_int,
@@ -4044,9 +4052,10 @@ pub struct OrtROCMProviderOptions {
     pub user_compute_stream: *mut ::std::os::raw::c_void,
     #[doc = " \\brief ROCM memory arena configuration parameters"]
     pub default_memory_arena_cfg: *mut OrtArenaCfg,
-    #[doc = " \\brief Enable TunableOp for using.\n   Set it to 1/0 to enable/disable TunableOp. Otherwise, it is disabled by default.\n   This option can be overriden by environment variable ORT_ROCM_TUNABLE_OP_ENABLE."]
+    pub enable_hip_graph: ::std::os::raw::c_int,
+    #[doc = " \\brief Enable TunableOp for using.\n   Set it to 1/0 to enable/disable TunableOp. Otherwise, it is disabled by default.\n   This option can be overridden by environment variable ORT_ROCM_TUNABLE_OP_ENABLE."]
     pub tunable_op_enable: ::std::os::raw::c_int,
-    #[doc = " \\brief Enable TunableOp for tuning.\n   Set it to 1/0 to enable/disable TunableOp tuning. Otherwise, it is disabled by default.\n   This option can be overriden by environment variable ORT_ROCM_TUNABLE_OP_TUNING_ENABLE."]
+    #[doc = " \\brief Enable TunableOp for tuning.\n   Set it to 1/0 to enable/disable TunableOp tuning. Otherwise, it is disabled by default.\n   This option can be overridden by environment variable ORT_ROCM_TUNABLE_OP_TUNING_ENABLE."]
     pub tunable_op_tuning_enable: ::std::os::raw::c_int,
     #[doc = " \\brief Max tuning duration time limit for each instance of TunableOp.\n   Defaults to 0 to disable the limit."]
     pub tunable_op_max_tuning_duration_ms: ::std::os::raw::c_int,
@@ -4072,14 +4081,16 @@ const _: () = {
         [::std::mem::offset_of!(OrtROCMProviderOptions, user_compute_stream) - 32usize];
     ["Offset of field: OrtROCMProviderOptions::default_memory_arena_cfg"]
         [::std::mem::offset_of!(OrtROCMProviderOptions, default_memory_arena_cfg) - 40usize];
+    ["Offset of field: OrtROCMProviderOptions::enable_hip_graph"]
+        [::std::mem::offset_of!(OrtROCMProviderOptions, enable_hip_graph) - 48usize];
     ["Offset of field: OrtROCMProviderOptions::tunable_op_enable"]
-        [::std::mem::offset_of!(OrtROCMProviderOptions, tunable_op_enable) - 48usize];
+        [::std::mem::offset_of!(OrtROCMProviderOptions, tunable_op_enable) - 52usize];
     ["Offset of field: OrtROCMProviderOptions::tunable_op_tuning_enable"]
-        [::std::mem::offset_of!(OrtROCMProviderOptions, tunable_op_tuning_enable) - 52usize];
+        [::std::mem::offset_of!(OrtROCMProviderOptions, tunable_op_tuning_enable) - 56usize];
     ["Offset of field: OrtROCMProviderOptions::tunable_op_max_tuning_duration_ms"][::std::mem::offset_of!(
         OrtROCMProviderOptions,
         tunable_op_max_tuning_duration_ms
-    ) - 56usize];
+    ) - 60usize];
 };
 #[doc = " \\brief TensorRT Provider Options\n\n \\see OrtApi::SessionOptionsAppendExecutionProvider_TensorRT"]
 #[repr(C)]
@@ -4170,11 +4181,15 @@ pub struct OrtMIGraphXProviderOptions {
     pub migraphx_int8_enable: ::std::os::raw::c_int,
     pub migraphx_use_native_calibration_table: ::std::os::raw::c_int,
     pub migraphx_int8_calibration_table_name: *const ::std::os::raw::c_char,
+    pub migraphx_save_compiled_model: ::std::os::raw::c_int,
+    pub migraphx_save_model_path: *const ::std::os::raw::c_char,
+    pub migraphx_load_compiled_model: ::std::os::raw::c_int,
+    pub migraphx_load_model_path: *const ::std::os::raw::c_char,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     ["Size of OrtMIGraphXProviderOptions"]
-        [::std::mem::size_of::<OrtMIGraphXProviderOptions>() - 24usize];
+        [::std::mem::size_of::<OrtMIGraphXProviderOptions>() - 56usize];
     ["Alignment of OrtMIGraphXProviderOptions"]
         [::std::mem::align_of::<OrtMIGraphXProviderOptions>() - 8usize];
     ["Offset of field: OrtMIGraphXProviderOptions::device_id"]
@@ -4193,6 +4208,18 @@ const _: () = {
         migraphx_int8_calibration_table_name
     )
         - 16usize];
+    ["Offset of field: OrtMIGraphXProviderOptions::migraphx_save_compiled_model"][::std::mem::offset_of!(
+        OrtMIGraphXProviderOptions,
+        migraphx_save_compiled_model
+    ) - 24usize];
+    ["Offset of field: OrtMIGraphXProviderOptions::migraphx_save_model_path"]
+        [::std::mem::offset_of!(OrtMIGraphXProviderOptions, migraphx_save_model_path) - 32usize];
+    ["Offset of field: OrtMIGraphXProviderOptions::migraphx_load_compiled_model"][::std::mem::offset_of!(
+        OrtMIGraphXProviderOptions,
+        migraphx_load_compiled_model
+    ) - 40usize];
+    ["Offset of field: OrtMIGraphXProviderOptions::migraphx_load_model_path"]
+        [::std::mem::offset_of!(OrtMIGraphXProviderOptions, migraphx_load_model_path) - 48usize];
 };
 #[doc = " \\brief OpenVINO Provider Options\n\n \\see OrtApi::SessionOptionsAppendExecutionProvider_OpenVINO"]
 #[repr(C)]
@@ -5498,7 +5525,7 @@ pub struct OrtApi {
             options: *mut OrtSessionOptions,
             initializer_names: *const *const ::std::os::raw::c_char,
             initializers: *const *const OrtValue,
-            initializers_num: usize,
+            num_initializers: usize,
         ) -> OrtStatusPtr,
     >,
     pub CreateOpAttr: ::std::option::Option<
@@ -5844,7 +5871,7 @@ pub struct OrtApi {
     pub KernelContext_GetResource: ::std::option::Option<
         unsafe extern "C" fn(
             context: *const OrtKernelContext,
-            resouce_version: ::std::os::raw::c_int,
+            resource_version: ::std::os::raw::c_int,
             resource_id: ::std::os::raw::c_int,
             resource: *mut *mut ::std::os::raw::c_void,
         ) -> OrtStatusPtr,
@@ -5918,10 +5945,42 @@ pub struct OrtApi {
             num_keys: usize,
         ) -> OrtStatusPtr,
     >,
+    pub SessionOptionsAppendExecutionProvider_VitisAI: ::std::option::Option<
+        unsafe extern "C" fn(
+            options: *mut OrtSessionOptions,
+            provider_options_keys: *const *const ::std::os::raw::c_char,
+            provider_options_values: *const *const ::std::os::raw::c_char,
+            num_keys: usize,
+        ) -> OrtStatusPtr,
+    >,
+    pub KernelContext_GetScratchBuffer: ::std::option::Option<
+        unsafe extern "C" fn(
+            context: *const OrtKernelContext,
+            mem_info: *const OrtMemoryInfo,
+            count_or_bytes: usize,
+            out: *mut *mut ::std::os::raw::c_void,
+        ) -> OrtStatusPtr,
+    >,
+    pub KernelInfoGetAllocator: ::std::option::Option<
+        unsafe extern "C" fn(
+            info: *const OrtKernelInfo,
+            mem_type: OrtMemType,
+            out: *mut *mut OrtAllocator,
+        ) -> OrtStatusPtr,
+    >,
+    pub AddExternalInitializersFromFilesInMemory: ::std::option::Option<
+        unsafe extern "C" fn(
+            options: *mut OrtSessionOptions,
+            external_initializer_file_names: *const *const ::std::os::raw::c_char,
+            external_initializer_file_buffer_array: *const *mut ::std::os::raw::c_char,
+            external_initializer_file_lengths: *const usize,
+            num_external_initializer_files: usize,
+        ) -> OrtStatusPtr,
+    >,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of OrtApi"][::std::mem::size_of::<OrtApi>() - 2208usize];
+    ["Size of OrtApi"][::std::mem::size_of::<OrtApi>() - 2240usize];
     ["Alignment of OrtApi"][::std::mem::align_of::<OrtApi>() - 8usize];
     ["Offset of field: OrtApi::CreateStatus"]
         [::std::mem::offset_of!(OrtApi, CreateStatus) - 0usize];
@@ -6473,6 +6532,14 @@ const _: () = {
         OrtApi,
         SessionOptionsAppendExecutionProvider_OpenVINO_V2
     ) - 2200usize];
+    ["Offset of field: OrtApi::SessionOptionsAppendExecutionProvider_VitisAI"]
+        [::std::mem::offset_of!(OrtApi, SessionOptionsAppendExecutionProvider_VitisAI) - 2208usize];
+    ["Offset of field: OrtApi::KernelContext_GetScratchBuffer"]
+        [::std::mem::offset_of!(OrtApi, KernelContext_GetScratchBuffer) - 2216usize];
+    ["Offset of field: OrtApi::KernelInfoGetAllocator"]
+        [::std::mem::offset_of!(OrtApi, KernelInfoGetAllocator) - 2224usize];
+    ["Offset of field: OrtApi::AddExternalInitializersFromFilesInMemory"]
+        [::std::mem::offset_of!(OrtApi, AddExternalInitializersFromFilesInMemory) - 2232usize];
 };
 #[repr(u32)]
 #[non_exhaustive]
@@ -6570,10 +6637,34 @@ pub struct OrtCustomOp {
     pub GetEndVersion: ::std::option::Option<
         unsafe extern "C" fn(op: *const OrtCustomOp) -> ::std::os::raw::c_int,
     >,
+    pub GetMayInplace: ::std::option::Option<
+        unsafe extern "C" fn(
+            input_index: *mut *mut ::std::os::raw::c_int,
+            output_index: *mut *mut ::std::os::raw::c_int,
+        ) -> usize,
+    >,
+    pub ReleaseMayInplace: ::std::option::Option<
+        unsafe extern "C" fn(
+            input_index: *mut ::std::os::raw::c_int,
+            output_index: *mut ::std::os::raw::c_int,
+        ),
+    >,
+    pub GetAliasMap: ::std::option::Option<
+        unsafe extern "C" fn(
+            input_index: *mut *mut ::std::os::raw::c_int,
+            output_index: *mut *mut ::std::os::raw::c_int,
+        ) -> usize,
+    >,
+    pub ReleaseAliasMap: ::std::option::Option<
+        unsafe extern "C" fn(
+            input_index: *mut ::std::os::raw::c_int,
+            output_index: *mut ::std::os::raw::c_int,
+        ),
+    >,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of OrtCustomOp"][::std::mem::size_of::<OrtCustomOp>() - 176usize];
+    ["Size of OrtCustomOp"][::std::mem::size_of::<OrtCustomOp>() - 208usize];
     ["Alignment of OrtCustomOp"][::std::mem::align_of::<OrtCustomOp>() - 8usize];
     ["Offset of field: OrtCustomOp::version"]
         [::std::mem::offset_of!(OrtCustomOp, version) - 0usize];
@@ -6619,6 +6710,14 @@ const _: () = {
         [::std::mem::offset_of!(OrtCustomOp, GetStartVersion) - 160usize];
     ["Offset of field: OrtCustomOp::GetEndVersion"]
         [::std::mem::offset_of!(OrtCustomOp, GetEndVersion) - 168usize];
+    ["Offset of field: OrtCustomOp::GetMayInplace"]
+        [::std::mem::offset_of!(OrtCustomOp, GetMayInplace) - 176usize];
+    ["Offset of field: OrtCustomOp::ReleaseMayInplace"]
+        [::std::mem::offset_of!(OrtCustomOp, ReleaseMayInplace) - 184usize];
+    ["Offset of field: OrtCustomOp::GetAliasMap"]
+        [::std::mem::offset_of!(OrtCustomOp, GetAliasMap) - 192usize];
+    ["Offset of field: OrtCustomOp::ReleaseAliasMap"]
+        [::std::mem::offset_of!(OrtCustomOp, ReleaseAliasMap) - 200usize];
 };
 extern "C" {
     pub fn OrtSessionOptionsAppendExecutionProvider_CUDA(

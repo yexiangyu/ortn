@@ -77,7 +77,9 @@ fn test_demo_code_iobinding() -> error::Result<()> {
     use ndarray::{Array2, Array4};
     use ndarray_rand::{rand_distr::Uniform, RandomExt};
     use prelude::*;
+
     let _ = dotenv::dotenv();
+
     std::env::set_var("RUST_LOG", "trace");
 
     let _ = tracing_subscriber::fmt::try_init();
