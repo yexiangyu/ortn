@@ -1,6 +1,7 @@
 #![doc = include_str!("../README.md")]
 
 pub(crate) mod api;
+pub(crate) mod macros;
 pub mod environment;
 pub mod error;
 pub mod iobinding;

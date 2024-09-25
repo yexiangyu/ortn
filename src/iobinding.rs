@@ -1,13 +1,14 @@
 use crate::error::{rc, Result};
+use crate::macros::call_api;
 use crate::session::Session;
-use crate::value::{AllocatorTrait, MemoryInfo, ValueTrait, ValueAllocated};
+use crate::value::{AllocatorTrait, MemoryInfo, ValueAllocated, ValueTrait};
 use std::ptr::null_mut;
 
 use itertools::Itertools;
 use ortn_sys as ffi;
 use tracing::trace;
 
-use crate::api::API;
+// use crate::api::API;
 
 #[derive(Debug)]
 pub struct IoBinding<'a> {
@@ -18,23 +19,18 @@ pub struct IoBinding<'a> {
 impl<'a> IoBinding<'a> {
     pub fn new(session: &'a Session) -> Result<Self> {
         let mut inner = null_mut();
-        rc(unsafe {
-            API.CreateIoBinding
-                .as_ref()
-                .expect("failed to get CreateIoBinding")(session.inner, &mut inner)
-        })?;
+        rc(call_api!(CreateIoBinding, session.inner, &mut inner))?;
         Ok(IoBinding { inner, session })
     }
 
     pub fn bind_input(&mut self, index: usize, value: &mut impl ValueTrait) -> Result<()> {
         let input = &self.session.inputs[index];
-        rc(unsafe {
-            API.BindInput.as_ref().expect("failed to get BindInput")(
-                self.inner,
-                input.name.as_ptr(),
-                value.inner(),
-            )
-        })?;
+        rc(call_api!(
+            BindInput,
+            self.inner,
+            input.name.as_ptr(),
+            value.inner()
+        ))?;
         Ok(())
     }
 
@@ -50,13 +46,7 @@ impl<'a> IoBinding<'a> {
 
     pub fn bind_output(&mut self, index: usize, value: &mut impl ValueTrait) -> Result<()> {
         let output = &self.session.outputs[index];
-        rc(unsafe {
-            API.BindOutput.as_ref().expect("failed to get BindOutput")(
-                self.inner,
-                output.name.as_ptr(),
-                value.inner(),
-            )
-        })?;
+        rc(call_api!(BindOutput, self.inner, output.name.as_ptr(), value.inner()))?;
         Ok(())
     }
 
@@ -72,15 +62,7 @@ impl<'a> IoBinding<'a> {
 
     pub fn bind_output_to_device(&mut self, index: usize, memory_info: &MemoryInfo) -> Result<()> {
         let output = &self.session.outputs[index];
-        rc(unsafe {
-            API.BindOutputToDevice
-                .as_ref()
-                .expect("failed to get BindOutputToDevice")(
-                self.inner,
-                output.name.as_ptr(),
-                memory_info.inner,
-            )
-        })?;
+        rc(call_api!(BindOutputToDevice, self.inner, output.name.as_ptr(), memory_info.inner))?;
         Ok(())
     }
 
@@ -91,37 +73,26 @@ impl<'a> IoBinding<'a> {
         Ok(())
     }
 
-    pub fn outputs<A>(&self, allocator: &'a A) -> Result<Vec<ValueAllocated<A>>> where A: AllocatorTrait{
+    pub fn outputs<A>(&self, allocator: &'a A) -> Result<Vec<ValueAllocated<A>>>
+    where
+        A: AllocatorTrait,
+    {
         let mut count = 0;
         let mut values = null_mut();
-        rc(unsafe {
-            API.GetBoundOutputValues
-                .as_ref()
-                .expect("failed to get GetBindingOutputValues")(
-                self.inner,
-                allocator.inner(),
-                &mut values,
-                &mut count,
-            )
-        })?;
+        rc(call_api!(GetBoundOutputValues, self.inner, allocator.inner(), &mut values, &mut count))?;
 
-        Ok((0..count).map(|n| {
-            let inner = *unsafe { values.add(n) .as_ref().expect("failed to get value") };
-            ValueAllocated {
-                inner,
-                allocator,
-            }
-        }).collect_vec())
+        Ok((0..count)
+            .map(|n| {
+                let inner = *unsafe { values.add(n).as_ref().expect("failed to get value") };
+                ValueAllocated { inner, allocator }
+            })
+            .collect_vec())
     }
 }
 
 impl<'a> Drop for IoBinding<'a> {
     fn drop(&mut self) {
         trace!("dropping {:?}", self);
-        unsafe {
-            API.ReleaseIoBinding
-                .as_ref()
-                .expect("failed to get ReleaseIoBinding")(self.inner);
-        }
+        call_api!(ReleaseIoBinding, self.inner);
     }
 }

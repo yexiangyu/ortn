@@ -2,11 +2,11 @@ use std::ffi::{CStr, CString};
 use std::ptr::{null, null_mut};
 use std::sync::Arc;
 
-use crate::api::API;
 use crate::environment::Environment;
 use crate::error::*;
 use crate::iobinding::IoBinding;
-use crate::value::{ValueOutput, ValueTrait, AllocatorDefault};
+use crate::macros::call_api;
+use crate::value::{AllocatorDefault, ValueOutput, ValueTrait};
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use ortn_sys as ffi;
@@ -42,11 +42,7 @@ unsafe impl Sync for Session {}
 impl Drop for Session {
     fn drop(&mut self) {
         trace!("dropping {:?}", self);
-        unsafe {
-            API.ReleaseSession
-                .as_ref()
-                .expect("failed to get ReleaseSession")(self.inner)
-        };
+        call_api!(ReleaseSession, self.inner);
     }
 }
 
@@ -55,13 +51,8 @@ impl Session {
         SessionBuilder::default()
     }
 
-    pub fn run_with_iobinding(&self, io: &mut IoBinding) -> Result<()>
-    {
-        rc(unsafe {
-            API.RunWithBinding
-                .as_ref()
-                .expect("failed to get RunWithBinding")(self.inner, null(), io.inner)
-        })?;
+    pub fn run_with_iobinding(&self, io: &mut IoBinding) -> Result<()> {
+        rc(call_api!(RunWithBinding, self.inner, null(), io.inner))?;
         Ok(())
     }
 
@@ -77,18 +68,17 @@ impl Session {
         let input_names = self.inputs.iter().map(|n| n.name.as_ptr()).collect_vec();
         let mut outputs = self.outputs.iter().map(|_| null_mut()).collect_vec();
         let output_names = self.outputs.iter().map(|n| n.name.as_ptr()).collect_vec();
-        rc(unsafe {
-            API.Run.as_ref().expect("failed to get Run")(
-                self.inner,
-                null(),
-                input_names.as_ptr(),
-                inputs.as_ptr(),
-                inputs.len(),
-                output_names.as_ptr(),
-                output_names.len(),
-                outputs.as_mut_ptr(),
-            )
-        })?;
+        rc(call_api!(
+            Run,
+            self.inner,
+            null(),
+            input_names.as_ptr(),
+            inputs.as_ptr(),
+            inputs.len(),
+            output_names.as_ptr(),
+            output_names.len(),
+            outputs.as_mut_ptr()
+        ))?;
         Ok(outputs
             .into_iter()
             .map(|inner| ValueOutput::new(inner, self))
@@ -97,87 +87,60 @@ impl Session {
 
     fn update_inputs(&mut self) -> Result<()> {
         let mut count = 0;
-        rc(unsafe {
-            API.SessionGetInputCount
-                .as_ref()
-                .expect("failed to get SessionGetInputCount")(self.inner, &mut count)
-        })?;
+
+        rc(call_api!(SessionGetInputCount, self.inner, &mut count))?;
 
         let allocator = AllocatorDefault::new()?;
 
         for index in 0..count {
             let mut name_ = null_mut();
-            rc(unsafe {
-                API.SessionGetInputName
-                    .as_ref()
-                    .expect("failed to get SessionGetInputName")(
-                    self.inner, index, allocator.inner, &mut name_,
-                )
-            })?;
-
+            rc(call_api!(
+                SessionGetInputName,
+                self.inner,
+                index,
+                allocator.inner,
+                &mut name_
+            ))?;
             let name = unsafe { CStr::from_ptr(name_) }.to_owned();
-
-            rc(unsafe {
-                API.AllocatorFree
-                    .as_ref()
-                    .expect("failed to get AllocatorFree")(
-                    allocator.inner, name_ as *mut _
-                )
-            })?;
+            rc(call_api!(AllocatorFree, allocator.inner, name_ as *mut _))?;
 
             let mut type_ = null_mut();
-
-            rc(unsafe {
-                API.SessionGetInputTypeInfo
-                    .as_ref()
-                    .expect("failed to get SessionGetInputTypeInfo")(
-                    self.inner, index, &mut type_
-                )
-            })?;
+            rc(call_api!(
+                SessionGetInputTypeInfo,
+                self.inner,
+                index,
+                &mut type_
+            ))?;
 
             let mut tensor_type_ = null();
 
-            rc(unsafe {
-                API.CastTypeInfoToTensorInfo
-                    .as_ref()
-                    .expect("failed to get CastTypeInfoToTensorInfo")(
-                    type_, &mut tensor_type_
-                )
-            })?;
+            rc(call_api!(
+                CastTypeInfoToTensorInfo,
+                type_,
+                &mut tensor_type_
+            ))?;
 
             let mut dim_count = 0;
 
-            rc(unsafe {
-                API.GetDimensionsCount
-                    .as_ref()
-                    .expect("failed to get GetTensorShapeElementCount")(
-                    tensor_type_,
-                    &mut dim_count,
-                )
-            })?;
+            rc(call_api!(GetDimensionsCount, tensor_type_, &mut dim_count))?;
 
             let mut dims = vec![0; dim_count];
 
-            rc(unsafe {
-                API.GetDimensions
-                    .as_ref()
-                    .expect("failed to get GetDimensions")(
-                    tensor_type_,
-                    dims.as_mut_ptr(),
-                    dim_count,
-                )
-            })?;
+            rc(call_api!(
+                GetDimensions,
+                tensor_type_,
+                dims.as_mut_ptr(),
+                dim_count
+            ))?;
 
             let mut data_type =
                 ffi::ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_UNDEFINED;
 
-            rc(unsafe {
-                API.GetTensorElementType
-                    .as_ref()
-                    .expect("failed to get GetTensorElementType")(
-                    tensor_type_, &mut data_type
-                )
-            })?;
+            rc(call_api!(
+                GetTensorElementType,
+                tensor_type_,
+                &mut data_type
+            ))?;
 
             self.inputs.push(TensorShapeInfo {
                 name,
@@ -190,89 +153,61 @@ impl Session {
 
     fn update_outputs(&mut self) -> Result<()> {
         let mut count = 0;
-        rc(unsafe {
-            API.SessionGetOutputCount
-                .as_ref()
-                .expect("failed to get SessionGetOutputCount")(self.inner, &mut count)
-        })?;
-
+        rc(call_api!(SessionGetOutputCount, self.inner, &mut count))?;
         let allocator = AllocatorDefault::new()?;
-
-
 
         for index in 0..count {
             let mut name_ = null_mut();
-            rc(unsafe {
-                API.SessionGetOutputName
-                    .as_ref()
-                    .expect("failed to get SessionGetOutputName")(
-                    self.inner, index, allocator.inner, &mut name_,
-                )
-            })?;
+            rc(call_api!(
+                SessionGetOutputName,
+                self.inner,
+                index,
+                allocator.inner,
+                &mut name_
+            ))?;
 
             let name = unsafe { CStr::from_ptr(name_) }.to_owned();
 
-            rc(unsafe {
-                API.AllocatorFree
-                    .as_ref()
-                    .expect("failed to get AllocatorFree")(
-                    allocator.inner, name_ as *mut _
-                )
-            })?;
+            rc(call_api!(AllocatorFree, allocator.inner, name_ as *mut _))?;
 
             let mut type_ = null_mut();
 
-            rc(unsafe {
-                API.SessionGetOutputTypeInfo
-                    .as_ref()
-                    .expect("failed to get SessionGetOutputTypeInfo")(
-                    self.inner, index, &mut type_
-                )
-            })?;
+            rc(call_api!(
+                SessionGetOutputTypeInfo,
+                self.inner,
+                index,
+                &mut type_
+            ))?;
 
             let mut tensor_type_ = null();
 
-            rc(unsafe {
-                API.CastTypeInfoToTensorInfo
-                    .as_ref()
-                    .expect("failed to get CastTypeInfoToTensorInfo")(
-                    type_, &mut tensor_type_
-                )
-            })?;
+            rc(call_api!(
+                CastTypeInfoToTensorInfo,
+                type_,
+                &mut tensor_type_
+            ))?;
 
             let mut dim_count = 0;
 
-            rc(unsafe {
-                API.GetDimensionsCount
-                    .as_ref()
-                    .expect("failed to get GetTensorShapeElementCount")(
-                    tensor_type_,
-                    &mut dim_count,
-                )
-            })?;
+            rc(call_api!(GetDimensionsCount, tensor_type_, &mut dim_count))?;
 
             let mut dims = vec![0; dim_count];
 
-            rc(unsafe {
-                API.GetDimensions
-                    .as_ref()
-                    .expect("failed to get GetDimensions")(
-                    tensor_type_,
-                    dims.as_mut_ptr(),
-                    dim_count,
-                )
-            })?;
+            rc(call_api!(
+                GetDimensions,
+                tensor_type_,
+                dims.as_mut_ptr(),
+                dim_count
+            ))?;
 
             let mut data_type =
                 ffi::ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_UNDEFINED;
 
-            rc(unsafe {
-                API.GetTensorElementType
-                    .as_ref()
-                    .expect("failed to get GetTensorElementType")(
-                    tensor_type_, &mut data_type
-                )
-            })?;
+            rc(call_api!(
+                GetTensorElementType,
+                tensor_type_,
+                &mut data_type
+            ))?;
 
             self.outputs.push(TensorShapeInfo {
                 name,
@@ -344,134 +279,92 @@ impl SessionBuilder {
 
     pub fn build(self, model: &[u8]) -> Result<Session> {
         let mut option = null_mut();
-        rc(unsafe {
-            API.CreateSessionOptions
-                .as_ref()
-                .expect("failed to get CreateSessionOptions")(&mut option)
-        })?;
+
+        rc(call_api!(CreateSessionOptions, &mut option))?;
 
         if self.use_cuda {
             let mut cuda_option = null_mut();
 
-            rc(unsafe {
-                API.CreateCUDAProviderOptions
-                    .as_ref()
-                    .expect("failed to get CreateCUDAProviderOptions")(
-                    &mut cuda_option
-                )
-            })?;
+            rc(call_api!(CreateCUDAProviderOptions, &mut cuda_option))?;
 
-            rc(unsafe {
-                API.UpdateCUDAProviderOptions
-                    .as_ref()
-                    .expect("failed to get UpdateCUDAProviderOptionsWithValue")(
-                    cuda_option,
-                    &CString::new("device_id")?.as_ptr(),
-                    &CString::new(self.cuda_device_id.to_string())?.as_ptr(),
-                    1,
-                )
-            })?;
+            rc(call_api!(
+                UpdateCUDAProviderOptions,
+                cuda_option,
+                &CString::new("device_id")?.as_ptr(),
+                &CString::new(self.cuda_device_id.to_string())?.as_ptr(),
+                1
+            ))?;
 
             if self.cuda_mem_limit > 0 {
-                rc(unsafe {
-                    API.UpdateCUDAProviderOptions
-                        .as_ref()
-                        .expect("failed to get UpdateCUDAProviderOptionsWithValue")(
-                        cuda_option,
-                        &CString::new("gpu_mem_limit")?.as_ptr(),
-                        &CString::new(self.cuda_mem_limit.to_string())?.as_ptr(),
-                        1,
-                    )
-                })?;
-            }
-
-            rc(unsafe {
-                API.SessionOptionsAppendExecutionProvider_CUDA_V2
-                    .as_ref()
-                    .expect("failed to get SessionOptionsAppendExecutionProvider_CUDA_V2")(
-                    option,
+                rc(call_api!(
+                    UpdateCUDAProviderOptions,
                     cuda_option,
-                )
-            })?;
-
-            unsafe {
-                API.ReleaseCUDAProviderOptions
-                    .as_ref()
-                    .expect("failed to get ReleaseCUDAProviderOptions")(cuda_option);
+                    &CString::new("gpu_mem_limit")?.as_ptr(),
+                    &CString::new(self.cuda_mem_limit.to_string())?.as_ptr(),
+                    1
+                ))?;
             }
+
+            rc(call_api!(
+                SessionOptionsAppendExecutionProvider_CUDA_V2,
+                option,
+                cuda_option
+            ))?;
+
+            call_api!(ReleaseCUDAProviderOptions, cuda_option);
         }
 
-        rc(unsafe {
-            API.SetIntraOpNumThreads
-                .as_ref()
-                .expect("failed to get SetIntraOpNumThreads")(
-                option, self.intra_threads as i32
-            )
-        })?;
+        rc(call_api!(
+            SetIntraOpNumThreads,
+            option,
+            self.intra_threads as i32
+        ))?;
 
-        rc(unsafe {
-            API.SetInterOpNumThreads
-                .as_ref()
-                .expect("failed to get SetInterOpNumThreads")(
-                option, self.inter_threads as i32
-            )
-        })?;
+        rc(call_api!(
+            SetInterOpNumThreads,
+            option,
+            self.inter_threads as i32
+        ))?;
 
-        rc(unsafe {
-            API.SetSessionGraphOptimizationLevel
-                .as_ref()
-                .expect("failed to get SetSessionGraphOptimizationLevel")(
-                option,
-                self.graph_optimization_level,
-            )
-        })?;
+        rc(call_api!(
+            SetSessionGraphOptimizationLevel,
+            option,
+            self.graph_optimization_level
+        ))?;
 
         if self.use_tensor_rt {
             let mut tensor_rt_option = null_mut();
-
-            rc(unsafe {
-                API.CreateTensorRTProviderOptions
-                    .as_ref()
-                    .expect("failed to get CreateTensorRTProviderOptions")(
-                    &mut tensor_rt_option
-                )
-            })?;
-
-            rc(unsafe {
-                API.UpdateTensorRTProviderOptions
-                    .as_ref()
-                    .expect("failed to get UpdateTensorRTProviderOptions")(
-                    tensor_rt_option,
-                    &CString::new("device_id")?.as_ptr(),
-                    &CString::new(self.cuda_device_id.to_string())?.as_ptr(),
-                    1,
-                )
-            })?;
-
-            unsafe {
-                API.ReleaseTensorRTProviderOptions
-                    .as_ref()
-                    .expect("failed to get ReleaseTensorRTProviderOptions")(
-                    tensor_rt_option
-                );
-            }
+            rc(call_api!(
+                CreateTensorRTProviderOptions,
+                &mut tensor_rt_option
+            ))?;
+            rc(call_api!(
+                UpdateTensorRTProviderOptions,
+                tensor_rt_option,
+                &CString::new("device_id")?.as_ptr(),
+                &CString::new(self.cuda_device_id.to_string())?.as_ptr(),
+                1
+            ))?;
+            rc(call_api!(
+                SessionOptionsAppendExecutionProvider_TensorRT_V2,
+                option,
+                tensor_rt_option
+            ))?;
+            call_api!(ReleaseTensorRTProviderOptions, tensor_rt_option);
         }
 
         let _env = self.env.unwrap_or_else(|| ENV.clone());
 
         let mut inner = null_mut();
 
-        rc(unsafe {
-            API.CreateSessionFromArray
-                .as_ref()
-                .expect("failed to get CreateSession")(
-                _env.inner(),
-                model.as_ptr() as *const _,
-                model.len(),
-                option,
-                &mut inner,
-            )
-        })?;
+        rc(call_api!(
+            CreateSessionFromArray,
+            _env.inner(),
+            model.as_ptr() as *const _,
+            model.len(),
+            option,
+            &mut inner
+        ))?;
 
         let mut session = Session {
             inner,

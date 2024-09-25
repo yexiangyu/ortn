@@ -1,12 +1,14 @@
 # `ortn`
 
-Yet another minimum `rust` binding for `onnxruntime` `c_api`.
+Yet another ***minimum*** `rust` binding for `onnxruntime` `c_api`, inspired by [onnxruntime-rs](https://github.com/nbigaouette/onnxruntime-rs).
 
-## Limitations
+## What's ***"minimum"*** means? 
 
-- only shared library (`onnxruntime.dll, libonnxruntime.[so|dyn])` supported
-- suppose to work with specified onnxruntime version on different platform only.
-
+- Only subset of `c_api` is wrapped, enough to run a onnx model.
+- Less `'a` lifetime generic...
+- Less concept overhead when use `rust` compare to use `onnxruntime` `c_api`.
+- ***Best effort*** to work with `latest` onnxruntime version on different platform, less `feature` flag introduced by multi-version of onnxruntime.
+- Only shared library (`onnxruntime.dll, libonnxruntime.[so|dyn])` supported.
 
 ## Test Matrix
 
@@ -104,6 +106,6 @@ cargo build --features bindgen
 ## TODO
 
 - More input data type like `f16`, `i64` ...
-- More wrapped value type like `opencv::Mat`
-- More runtime provider
+- More runtime provider like `rocm` and `cann`
 - `onnxruntime-agi`
+- `training api`

@@ -2,7 +2,8 @@ use std::ffi::CStr;
 use std::ptr::null_mut;
 use tracing::*;
 
-use crate::api::API;
+// use crate::api::API;
+use crate::macros::call_api;
 use crate::error::*;
 use ortn_sys as ffi;
 use smart_default::SmartDefault;
@@ -34,7 +35,7 @@ impl Drop for Environment
 {
     fn drop(&mut self) {
         trace!("dropping {:?}", self);
-        unsafe { API.ReleaseEnv.as_ref().expect("failed to get ReleaseSession")(self.inner) };
+        call_api!(ReleaseEnv, self.inner);
     }
 }
 
@@ -86,16 +87,7 @@ impl EnvironmentBuilder {
     pub fn build(self) -> Result<Environment> {
         let mut inner = null_mut();
         let name = std::ffi::CString::new(self.name.as_bytes())?;
-        rc(unsafe {
-            API.CreateEnvWithCustomLogger
-                .expect("failed to get CreateEnvWithCustomLogger")(
-                Some(logging_function),
-                null_mut(),
-                self.logging_level,
-                name.as_ptr(),
-                &mut inner,
-            )
-        })?;
+        call_api!(CreateEnvWithCustomLogger, Some(logging_function), null_mut(), self.logging_level, name.as_ptr(), &mut inner);    
         Ok(Environment { inner })
     }
 }
