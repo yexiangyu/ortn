@@ -1,6 +1,6 @@
 [package]
 name = "ortn-sys"
-version = "0.1.0"
+version = "1.19.2"
 edition = "2021"
 
 [build-dependencies]

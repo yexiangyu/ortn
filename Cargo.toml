@@ -2,7 +2,7 @@
 members = ["ortn-sys"]
 [package]
 name = "ortn"
-version = "0.1.0"
+version = "1.19.2"
 edition = "2021"
 
 [features]
@@ -19,7 +19,7 @@ dotenv = "0.15.0"
 itertools = "0.13.0"
 lazy_static = "1.5.0"
 ndarray = "*"
-ortn-sys = { path = "./ortn-sys" }
+ortn-sys = { path = "./ortn-sys", version = "1.19.2" }
 smart-default = "0.7.1"
 thiserror = "1.0.64"
 tracing = "0.1.40"
