@@ -261,7 +261,7 @@ impl SessionBuilder {
         self
     }
 
-    pub fn with_cuda_deivice(mut self, device_id: i32) -> Self {
+    pub fn with_cuda_device(mut self, device_id: i32) -> Self {
         self.cuda_device_id = device_id;
         self
     }
