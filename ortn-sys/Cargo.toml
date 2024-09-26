@@ -6,8 +6,10 @@ edition = "2021"
 [build-dependencies]
 dotenv = "0.15.0"
 bindgen = "0.70.1"
+regex = "1.10.6"
 
 [features]
 bindgen = []
+cuda = []
 
 [dependencies]

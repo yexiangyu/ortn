@@ -1,14 +1,15 @@
 use crate::error::{rc, Result};
 use crate::macros::call_api;
 use crate::session::Session;
-use crate::value::{AllocatorTrait, MemoryInfo, ValueAllocated, ValueTrait};
+use crate::value::{AllocatorTrait, MemoryInfo, ValueAllocated, ValueTrait, ValueView};
+use std::marker::PhantomData;
 use std::ptr::null_mut;
 
 use itertools::Itertools;
 use ortn_sys as ffi;
 use tracing::trace;
+use std::ffi::c_void;
 
-// use crate::api::API;
 
 #[derive(Debug)]
 pub struct IoBinding<'a> {
@@ -46,7 +47,12 @@ impl<'a> IoBinding<'a> {
 
     pub fn bind_output(&mut self, index: usize, value: &mut impl ValueTrait) -> Result<()> {
         let output = &self.session.outputs[index];
-        rc(call_api!(BindOutput, self.inner, output.name.as_ptr(), value.inner()))?;
+        rc(call_api!(
+            BindOutput,
+            self.inner,
+            output.name.as_ptr(),
+            value.inner()
+        ))?;
         Ok(())
     }
 
@@ -62,7 +68,12 @@ impl<'a> IoBinding<'a> {
 
     pub fn bind_output_to_device(&mut self, index: usize, memory_info: &MemoryInfo) -> Result<()> {
         let output = &self.session.outputs[index];
-        rc(call_api!(BindOutputToDevice, self.inner, output.name.as_ptr(), memory_info.inner))?;
+        rc(call_api!(
+            BindOutputToDevice,
+            self.inner,
+            output.name.as_ptr(),
+            memory_info.inner
+        ))?;
         Ok(())
     }
 
@@ -73,20 +84,39 @@ impl<'a> IoBinding<'a> {
         Ok(())
     }
 
-    pub fn outputs<A>(&self, allocator: &'a A) -> Result<Vec<ValueAllocated<A>>>
+    pub fn outputs<'b, 'c, A>(
+        &'b self,
+        allocator: &'a A,
+    ) -> Result<Vec<ValueAllocated<'a, A>>>
     where
         A: AllocatorTrait,
     {
         let mut count = 0;
         let mut values = null_mut();
-        rc(call_api!(GetBoundOutputValues, self.inner, allocator.inner(), &mut values, &mut count))?;
 
-        Ok((0..count)
+        rc(call_api!(
+            GetBoundOutputValues,
+            self.inner,
+            allocator.inner(),
+            &mut values,
+            &mut count
+        ))?;
+
+        let r =  (0..count)
             .map(|n| {
                 let inner = *unsafe { values.add(n).as_ref().expect("failed to get value") };
-                ValueAllocated { inner, allocator }
+                let value_ = ValueView::<IoBinding> {
+                    inner,
+                    _marker: PhantomData,
+                }.clone_with_allocator(allocator)?;
+                Ok(value_)
             })
-            .collect_vec())
+            .collect::<Result<Vec<_>>>()?;
+
+        allocator.free(values);
+
+        Ok(r)
+
     }
 }
 

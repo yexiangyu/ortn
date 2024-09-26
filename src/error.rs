@@ -10,6 +10,11 @@ pub enum Error {
         code: ffi::OrtErrorCode,
         message: String,
     },
+    #[cfg(feature = "cuda")]
+    #[error("{:?}", .0)]
+    CudaError(ortn_sys::cuda::cudaError),
+    #[error("could not view value on device as ndarray")]
+    ValueViewOnDeviceSide,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

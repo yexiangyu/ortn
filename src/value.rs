@@ -1,16 +1,50 @@
-use std::ffi::{c_void, CString};
+use std::ffi::{c_void, CStr, CString};
 use std::marker::PhantomData;
-use std::ptr::null_mut;
+use std::ptr::{null, null_mut};
 
 use itertools::Itertools;
 use ortn_sys::{self as ffi, ONNXTensorElementDataType};
 use tracing::*;
 
-// use crate::api::API;
 use crate::error::*;
 use crate::macros::*;
 use crate::session::{Session, TensorShapeInfo};
 use ndarray::{ArrayView, ArrayViewD, Dimension};
+
+pub trait ONNXTensorElementDataTypeSizeTrait {
+    fn size(&self) -> usize;
+}
+
+impl ONNXTensorElementDataTypeSizeTrait for ONNXTensorElementDataType {
+    fn size(&self) -> usize {
+        match self {
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT => 4,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32 => 4,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64 => 8,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8 => 1,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8 => 1,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT16 => 2,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT16 => 2,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_STRING => 1,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_BOOL => 1,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16 => 2,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_DOUBLE => 8,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT32 => 4,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT64 => 8,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_COMPLEX64 => 8,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_COMPLEX128 => 16,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_BFLOAT16 => 2,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT8E4M3FN => 1,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT8E4M3FNUZ => 1,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT8E5M2 => 1,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT8E5M2FNUZ => 1,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT4 => 0, //WTF?
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT4 => 0,  //WTF?
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_UNDEFINED => todo!(),
+            _ => todo!(),
+        }
+    }
+}
 
 /// all OrtValue type should implement this trait
 pub trait ValueTrait {
@@ -61,24 +95,151 @@ pub trait ValueTrait {
         })
     }
 
+    fn mem_info(&self) -> Result<ConstMemoryInfo> {
+        let mut mem_info = null();
+        rc(call_api!(GetTensorMemoryInfo, self.inner(), &mut mem_info))?;
+        Ok(ConstMemoryInfo { inner: mem_info })
+    }
+
     fn view<T>(&self) -> Result<ArrayViewD<T>> {
+        match self.mem_info()?.device_type()? {
+            ffi::OrtMemoryInfoDeviceType::OrtMemoryInfoDeviceType_CPU => {}
+            _ => return Err(Error::ValueViewOnDeviceSide),
+        }
         let ptr = self.as_ptr()? as *const T;
         let shape_info = self.shape_info()?;
         let dims = shape_info.dims.iter().map(|d| *d as usize).collect_vec();
         let dims = ndarray::IxDyn(&dims);
         Ok(unsafe { ArrayViewD::from_shape_ptr(dims, ptr) })
     }
+
+    fn assign(&self, rhs: &mut impl ValueTrait) -> Result<()> {
+        let shape_info = self.shape_info()?;
+        let typ = shape_info.data_type;
+        let dims = shape_info.dims;
+        let n_elements = dims.iter().fold(1, |acc, d| acc * d) as usize;
+        let size = n_elements * typ.size();
+
+        let mem_info_lhs = self.mem_info()?;
+        let mem_info_rhs = rhs.mem_info()?;
+
+        let mem_name_lhs = mem_info_lhs.name()?;
+        let mem_name_rhs = mem_info_rhs.name()?;
+
+        let dst = rhs.as_mut_ptr()? as *mut _;
+        let src = self.as_ptr()? as *const _;
+
+        trace!(
+            "copy from {} => {} n_elements={}, typ={:?}",
+            mem_name_lhs,
+            mem_name_rhs,
+            n_elements,
+            typ
+        );
+
+        match (mem_info_lhs.device_type()?, mem_info_rhs.device_type()?) {
+            (
+                ortn_sys::OrtMemoryInfoDeviceType::OrtMemoryInfoDeviceType_CPU,
+                ortn_sys::OrtMemoryInfoDeviceType::OrtMemoryInfoDeviceType_CPU,
+            ) => {
+                unsafe { std::ptr::copy_nonoverlapping(src, dst, size) };
+            }
+            (
+                ortn_sys::OrtMemoryInfoDeviceType::OrtMemoryInfoDeviceType_CPU,
+                ortn_sys::OrtMemoryInfoDeviceType::OrtMemoryInfoDeviceType_GPU,
+            ) => match mem_name_rhs.as_str() {
+                #[cfg(feature = "cuda")]
+                "Cuda" => {
+                    cuda::cuda_mem_copy(
+                        dst,
+                        src,
+                        size,
+                        ffi::cuda::cudaMemcpyKind::cudaMemcpyHostToDevice,
+                    )?;
+                }
+                _ => {
+                    error!(
+                        "failed to copy data from {} => {}, not implemented",
+                        mem_name_lhs, mem_name_rhs
+                    );
+                    todo!()
+                }
+            },
+            (
+                ortn_sys::OrtMemoryInfoDeviceType::OrtMemoryInfoDeviceType_GPU,
+                ortn_sys::OrtMemoryInfoDeviceType::OrtMemoryInfoDeviceType_CPU,
+            ) => match mem_name_lhs.as_str() {
+                #[cfg(feature = "cuda")]
+                "Cuda" => cuda::cuda_mem_copy(
+                    dst,
+                    src,
+                    size,
+                    ffi::cuda::cudaMemcpyKind::cudaMemcpyDeviceToHost,
+                )?,
+                _ => {
+                    error!(
+                        "failed to copy data from {} => {}, not implemented",
+                        mem_name_lhs, mem_name_rhs
+                    );
+                    todo!()
+                }
+            },
+            (
+                ortn_sys::OrtMemoryInfoDeviceType::OrtMemoryInfoDeviceType_GPU,
+                ortn_sys::OrtMemoryInfoDeviceType::OrtMemoryInfoDeviceType_GPU,
+            ) => match (mem_name_lhs.as_str(), mem_name_rhs.as_str()) {
+                #[cfg(feature = "cuda")]
+                ("Cuda", "Cuda") => cuda::cuda_mem_copy(
+                    dst,
+                    src,
+                    size,
+                    ffi::cuda::cudaMemcpyKind::cudaMemcpyDeviceToDevice,
+                )?,
+                _ => {
+                    error!(
+                        "failed to copy data from {} => {}",
+                        mem_name_lhs, mem_name_rhs
+                    );
+                    todo!()
+                }
+            },
+            (_, _) => {
+                error!(
+                    "failed to copy data from {} => {}",
+                    mem_name_lhs, mem_name_rhs
+                );
+                todo!()
+            }
+        }
+        Ok(())
+    }
+
+    fn clone_with_allocator<'a, A>(&self, allocator: &'a A) -> Result<ValueAllocated<'a, A>>
+    where
+        A: AllocatorTrait,
+    {
+        let shape_info = self.shape_info()?;
+        let mut value = ValueAllocated::new(shape_info.dims, allocator, shape_info.data_type)?;
+        self.assign(&mut value)?;
+        Ok(value)
+    }
 }
 
 /// value that created from extern data as reference
 pub struct ValueView<'a, T> {
-    inner: *mut ffi::OrtValue,
-    _marker: PhantomData<&'a T>,
+    pub inner: *mut ffi::OrtValue,
+    pub _marker: PhantomData<&'a T>,
 }
 
 impl<'a, T> ValueTrait for ValueView<'a, T> {
     fn inner(&self) -> *mut ortn_sys::OrtValue {
         self.inner
+    }
+}
+
+impl<'a, T> Drop for ValueView<'a, T> {
+    fn drop(&mut self) {
+        call_api!(ReleaseValue, self.inner as *mut _);
     }
 }
 
@@ -135,8 +296,8 @@ where
 
 /// value that created by and managed by session, like output
 pub struct ValueOutput<'a> {
-    inner: *mut ffi::OrtValue,
-    _session: PhantomData<&'a Session>,
+    pub inner: *mut ffi::OrtValue,
+    pub _session: PhantomData<&'a Session>,
 }
 
 impl<'a> ValueTrait for ValueOutput<'a> {
@@ -154,6 +315,58 @@ impl<'a> ValueOutput<'a> {
     }
 }
 
+pub trait MemoryInfoTrait {
+    fn inner(&self) -> *mut ffi::OrtMemoryInfo;
+    fn name(&self) -> Result<String> {
+        let mut name = null();
+        rc(call_api!(MemoryInfoGetName, self.inner(), &mut name))?;
+        let name = unsafe { CStr::from_ptr(name) }
+            .to_string_lossy()
+            .to_string();
+        Ok(name)
+    }
+
+    fn id(&self) -> Result<i32> {
+        let mut id = 0;
+        rc(call_api!(MemoryInfoGetId, self.inner(), &mut id))?;
+        Ok(id)
+    }
+
+    fn mem_type(&self) -> Result<()> {
+        let mut mem_type = ffi::OrtMemType::OrtMemTypeDefault;
+        rc(call_api!(MemoryInfoGetMemType, self.inner(), &mut mem_type))?;
+        Ok(())
+    }
+
+    fn device_type(&self) -> Result<ffi::OrtMemoryInfoDeviceType> {
+        let mut device_type = ffi::OrtMemoryInfoDeviceType::OrtMemoryInfoDeviceType_CPU;
+        call_api!(MemoryInfoGetDeviceType, self.inner(), &mut device_type);
+        Ok(device_type)
+    }
+
+    fn equal(&self, other: &impl MemoryInfoTrait) -> Result<bool> {
+        let mut equal = 0;
+        rc(call_api!(
+            CompareMemoryInfo,
+            self.inner(),
+            other.inner(),
+            &mut equal
+        ))?;
+        Ok(equal > 0)
+    }
+}
+
+#[derive(Debug)]
+pub struct ConstMemoryInfo {
+    pub inner: *const ffi::OrtMemoryInfo,
+}
+
+impl MemoryInfoTrait for ConstMemoryInfo {
+    fn inner(&self) -> *mut ffi::OrtMemoryInfo {
+        self.inner as *mut _
+    }
+}
+
 #[derive(Debug)]
 pub struct MemoryInfo {
     pub inner: *mut ffi::OrtMemoryInfo,
@@ -162,15 +375,34 @@ pub struct MemoryInfo {
 impl MemoryInfo {
     pub fn new_cpu() -> Result<Self> {
         let mut inner = null_mut();
-        rc(call_api!(CreateCpuMemoryInfo, ffi::OrtAllocatorType::OrtArenaAllocator, ffi::OrtMemType::OrtMemTypeDefault, &mut inner))?;
+        rc(call_api!(
+            CreateCpuMemoryInfo,
+            ffi::OrtAllocatorType::OrtArenaAllocator,
+            ffi::OrtMemType::OrtMemTypeDefault,
+            &mut inner
+        ))?;
         Ok(MemoryInfo { inner })
     }
 
+    #[cfg(feature = "cuda")]
     pub fn new_cuda(device_id: u32) -> Result<Self> {
-        let name = CString::new("CUDA")?;
+        let name = CString::new("Cuda")?;
         let mut inner = null_mut();
-        rc(call_api!(CreateMemoryInfo, name.as_ptr(), ffi::OrtAllocatorType::OrtDeviceAllocator, device_id as i32, ffi::OrtMemType::OrtMemTypeDefault, &mut inner))?;
+        rc(call_api!(
+            CreateMemoryInfo,
+            name.as_ptr(),
+            ffi::OrtAllocatorType::OrtDeviceAllocator,
+            device_id as i32,
+            ffi::OrtMemType::OrtMemTypeDefault,
+            &mut inner
+        ))?;
         Ok(MemoryInfo { inner })
+    }
+}
+
+impl MemoryInfoTrait for MemoryInfo {
+    fn inner(&self) -> *mut ffi::OrtMemoryInfo {
+        self.inner
     }
 }
 
@@ -183,6 +415,10 @@ impl Drop for MemoryInfo {
 
 pub trait AllocatorTrait: std::fmt::Debug {
     fn inner(&self) -> *mut ffi::OrtAllocator;
+
+    fn free<T>(&self, value: *mut T) {
+        call_api!(AllocatorFree, self.inner(), value as *mut c_void);
+    }
 }
 
 #[derive(Debug)]
@@ -206,7 +442,9 @@ impl AllocatorDefault {
     pub fn new() -> Result<Self> {
         let mut inner = null_mut();
         rc(call_api!(GetAllocatorWithDefaultOptions, &mut inner))?;
-        Ok(AllocatorDefault { inner })
+        let r= Ok(AllocatorDefault { inner });
+        trace!(?r, "created");
+        r
     }
 }
 
@@ -219,8 +457,15 @@ pub struct AllocatorSession<'a> {
 impl<'a> AllocatorSession<'a> {
     pub fn new(memory_info: &MemoryInfo, session: &'a Session) -> Result<Self> {
         let mut inner = null_mut();
-        rc(call_api!(CreateAllocator, session.inner, memory_info.inner, &mut inner))?;
-        Ok(AllocatorSession { inner, session })
+        rc(call_api!(
+            CreateAllocator,
+            session.inner,
+            memory_info.inner,
+            &mut inner
+        ))?;
+        let r= Ok(AllocatorSession { inner, session });
+        trace!(?r, "created");
+        r
     }
 }
 
@@ -237,7 +482,7 @@ where
     A: AllocatorTrait,
 {
     pub inner: *mut ffi::OrtValue,
-    pub allocator: &'a A,
+    pub _allocator: PhantomData<&'a A>,
 }
 
 impl<'a, A> ValueTrait for ValueAllocated<'a, A>
@@ -249,12 +494,91 @@ where
     }
 }
 
+impl<'a, A> ValueAllocated<'a, A>
+where
+    A: AllocatorTrait,
+{
+    pub fn new(
+        dims: impl AsRef<[i64]>,
+        allocator: &'a A,
+        typ: ONNXTensorElementDataType,
+    ) -> Result<Self> {
+        let dims = dims.as_ref();
+        let mut inner = null_mut();
+        rc(call_api!(
+            CreateTensorAsOrtValue,
+            allocator.inner(),
+            dims.as_ptr(),
+            dims.len(),
+            typ,
+            &mut inner
+        ))?;
+        Ok(ValueAllocated {
+            inner,
+            _allocator: PhantomData,
+        })
+    }
+}
+
 impl<'a, A> Drop for ValueAllocated<'a, A>
 where
     A: AllocatorTrait,
 {
     fn drop(&mut self) {
         trace!("dropping {:?}", self);
-        call_api!(AllocatorFree, self.allocator.inner(), self.inner as *mut _);
+        call_api!(ReleaseValue, self.inner as *mut _);
+    }
+}
+
+#[cfg(feature = "cuda")]
+pub mod cuda {
+    use crate::error::*;
+    use ortn_sys as ffi;
+    use std::ffi::c_void;
+
+    fn rc(code: ffi::cuda::cudaError) -> Result<()> {
+        if code != ffi::cuda::cudaError::cudaSuccess {
+            return Err(Error::CudaError(code));
+        }
+        Ok(())
+    }
+
+    macro_rules! cuda_call {
+        ($func:ident, $a1: expr) => {
+            unsafe { ortn_sys::cuda::$func($a1) }
+        };
+
+        ($func:ident, $a1: expr, $a2: expr) => {
+            unsafe { ortn_sys::cuda::$func($a1, $a2) }
+        };
+
+        ($func:ident, $a1: expr, $a2: expr, $a3: expr) => {
+            unsafe { ortn_sys::cuda::$func($a1, $a2, $a3) }
+        };
+
+        ($func:ident, $a1: expr, $a2: expr, $a3: expr, $a4: expr) => {
+            unsafe { ortn_sys::cuda::$func($a1, $a2, $a3, $a4) }
+        };
+    }
+
+    pub fn set_current_device(device_id: i32) -> Result<()> {
+        rc(cuda_call!(cudaSetDevice, device_id))?;
+        Ok(())
+    }
+
+    pub fn get_current_device() -> Result<i32> {
+        let mut device_id = 0;
+        rc(cuda_call!(cudaGetDevice, &mut device_id))?;
+        Ok(device_id)
+    }
+
+    pub fn cuda_mem_copy(
+        dst: *mut c_void,
+        src: *const c_void,
+        count: usize,
+        kind: ffi::cuda::cudaMemcpyKind,
+    ) -> Result<()> {
+        rc(cuda_call!(cudaMemcpy, dst, src, count, kind))?;
+        Ok(())
     }
 }

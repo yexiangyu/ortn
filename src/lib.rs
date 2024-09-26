@@ -1,23 +1,27 @@
 #![doc = include_str!("../README.md")]
 
 pub(crate) mod api;
-pub(crate) mod macros;
 pub mod environment;
 pub mod error;
 pub mod iobinding;
+pub(crate) mod macros;
 pub mod session;
 pub mod value;
 
 pub mod prelude {
     pub use super::environment::Environment;
     pub use super::error::{Error, Result};
-    pub use super::session::Session;
     pub use super::iobinding::IoBinding;
+    pub use super::session::Session;
     pub use super::value::{
         AllocatorDefault, AllocatorSession, AllocatorTrait, AsONNXTensorElementDataTypeTrait,
         MemoryInfo, ValueTrait, ValueView,
     };
-    pub use ortn_sys::{GraphOptimizationLevel, OrtLoggingLevel};
+    #[cfg(feature = "cuda")]
+    pub use ortn_sys::cuda::{cudaError, cudaMemcpyKind};
+    pub use ortn_sys::{
+        GraphOptimizationLevel, OrtLoggingLevel, OrtMemType, OrtMemoryInfoDeviceType,
+    };
 }
 
 #[allow(unused)]
@@ -78,6 +82,7 @@ fn test_demo_code_iobinding() -> error::Result<()> {
     use ndarray::{Array2, Array4};
     use ndarray_rand::{rand_distr::Uniform, RandomExt};
     use prelude::*;
+    use value::ValueAllocated;
 
     let _ = dotenv::dotenv();
 
@@ -90,11 +95,11 @@ fn test_demo_code_iobinding() -> error::Result<()> {
         .with_env(
             Environment::builder()
                 .with_name("minst")
-                .with_level(OrtLoggingLevel::ORT_LOGGING_LEVEL_VERBOSE)
+                .with_level(OrtLoggingLevel::ORT_LOGGING_LEVEL_ERROR)
                 .build()?,
         )
         // use cuda
-        // .with_use_tensor_rt(true)
+        .with_use_tensor_rt(true)
         // disable all optimization
         .with_graph_optimization_level(GraphOptimizationLevel::ORT_DISABLE_ALL)
         // set session intra threads to 4
@@ -105,20 +110,18 @@ fn test_demo_code_iobinding() -> error::Result<()> {
     let input = Array4::random([1, 1, 28, 28], Uniform::new(0., 1.));
     let mut input = ValueView::try_from(input.view())?;
 
-    let output_ =  Array2::<f32>::zeros([1, 10]);
-    let mut output = ValueView::try_from(output_.view())?;
-
-    let allocator = AllocatorDefault::new()?;
-    let memory_info = MemoryInfo::new_cpu()?;
+    let cpu_allocator = AllocatorDefault::new()?;
+    let cuda_memory_info = MemoryInfo::new_cuda(0)?;
 
     let mut io_binding = IoBinding::new(&session)?;
 
     io_binding.bind_input(0, &mut input)?;
-    io_binding.bind_output_to_device(0, &memory_info)?;
-    // run model
+    io_binding.bind_output_to_device(0, &cuda_memory_info)?;
+
     session.run_with_iobinding(&mut io_binding)?;
 
-    let output = io_binding.outputs(&allocator)?.into_iter().next().unwrap();
+    let output = io_binding.outputs(&cpu_allocator)?.into_iter().next().unwrap();
+
     let output = output.view::<f32>()?;
 
     tracing::info!(?output);
