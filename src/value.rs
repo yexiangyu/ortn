@@ -9,7 +9,13 @@ use tracing::*;
 use crate::error::*;
 use crate::macros::*;
 use crate::session::{Session, TensorShapeInfo};
+use lazy_static::lazy_static;
 use ndarray::{ArrayView, ArrayViewD, Dimension};
+
+lazy_static! {
+    pub static ref ALLOCATOR_DEFAULT: AllocatorDefault =
+        AllocatorDefault::new().expect("failed to create default allocator");
+}
 
 pub trait ONNXTensorElementDataTypeSizeTrait {
     fn size(&self) -> usize;
@@ -214,6 +220,14 @@ pub trait ValueTrait {
         Ok(())
     }
 
+    fn clone_host(&self) -> Result<ValueAllocated<'static, AllocatorDefault>> {
+        let shape_info = self.shape_info()?;
+        let mut value =
+            ValueAllocated::new(shape_info.dims, &*ALLOCATOR_DEFAULT, shape_info.data_type)?;
+        self.assign(&mut value)?;
+        Ok(value)
+    }
+
     fn clone_with_allocator<'a, A>(&self, allocator: &'a A) -> Result<ValueAllocated<'a, A>>
     where
         A: AllocatorTrait,
@@ -225,25 +239,30 @@ pub trait ValueTrait {
     }
 }
 
-/// value that created from extern data as reference
-pub struct ValueView<'a, T> {
+/// `OrtValue` that created from extern data as reference or managed by session
+#[derive(Debug)]
+pub struct ValueBorrowed<'a, T> {
     pub inner: *mut ffi::OrtValue,
     pub _marker: PhantomData<&'a T>,
 }
 
-impl<'a, T> ValueTrait for ValueView<'a, T> {
+unsafe impl<'a, T> Sync for ValueBorrowed<'a, T> {}
+unsafe impl<'a, T> Send for ValueBorrowed<'a, T> {}
+
+impl<'a, T> ValueTrait for ValueBorrowed<'a, T> {
     fn inner(&self) -> *mut ortn_sys::OrtValue {
         self.inner
     }
 }
 
-impl<'a, T> Drop for ValueView<'a, T> {
+impl<'a, T> Drop for ValueBorrowed<'a, T> {
     fn drop(&mut self) {
         call_api!(ReleaseValue, self.inner as *mut _);
     }
 }
 
-pub trait AsONNXTensorElementDataTypeTrait {
+/// helper trait to convert data type like `f32` to `ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT`
+pub trait AsONNXTensorElementDataTypeTrait: std::fmt::Debug {
     fn typ() -> ONNXTensorElementDataType;
 }
 
@@ -259,7 +278,8 @@ macro_rules! impl_as_onnx_tensor_element_data_type {
 
 impl_as_onnx_tensor_element_data_type!(f32, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT);
 
-impl<'a, A, D> TryFrom<ArrayView<'a, A, D>> for ValueView<'a, ArrayView<'a, A, D>>
+/// helper function to convert `ndarray::ArrayView` to `ValueBorrowed`
+impl<'a, A, D> TryFrom<ArrayView<'a, A, D>> for ValueBorrowed<'a, ArrayView<'a, A, D>>
 where
     A: AsONNXTensorElementDataTypeTrait,
     D: Dimension,
@@ -287,36 +307,20 @@ where
             typ,
             &mut inner
         ))?;
-        Ok(ValueView {
+        let r = Ok(ValueBorrowed {
             inner,
             _marker: PhantomData,
-        })
+        });
+        trace!(?r, "create");
+        r
     }
 }
 
-/// value that created by and managed by session, like output
-pub struct ValueOutput<'a> {
-    pub inner: *mut ffi::OrtValue,
-    pub _session: PhantomData<&'a Session>,
-}
-
-impl<'a> ValueTrait for ValueOutput<'a> {
-    fn inner(&self) -> *mut ortn_sys::OrtValue {
-        self.inner
-    }
-}
-
-impl<'a> ValueOutput<'a> {
-    pub fn new(inner: *mut ffi::OrtValue, _session: &'a Session) -> Self {
-        Self {
-            inner,
-            _session: PhantomData,
-        }
-    }
-}
-
+/// `OrtMemoryInfo` trait
 pub trait MemoryInfoTrait {
     fn inner(&self) -> *mut ffi::OrtMemoryInfo;
+
+    /// get OrtMemoryInfo name, should be `"Cpu"` or `"Cuda"` or something else
     fn name(&self) -> Result<String> {
         let mut name = null();
         rc(call_api!(MemoryInfoGetName, self.inner(), &mut name))?;
@@ -326,24 +330,28 @@ pub trait MemoryInfoTrait {
         Ok(name)
     }
 
+    /// get OrtMemoryInfo id
     fn id(&self) -> Result<i32> {
         let mut id = 0;
         rc(call_api!(MemoryInfoGetId, self.inner(), &mut id))?;
         Ok(id)
     }
 
-    fn mem_type(&self) -> Result<()> {
+    /// get OrtMemoryInfo mem_type
+    fn mem_type(&self) -> Result<ffi::OrtMemType> {
         let mut mem_type = ffi::OrtMemType::OrtMemTypeDefault;
         rc(call_api!(MemoryInfoGetMemType, self.inner(), &mut mem_type))?;
-        Ok(())
+        Ok(mem_type)
     }
 
+    /// get OrtMemoryInfo device_type
     fn device_type(&self) -> Result<ffi::OrtMemoryInfoDeviceType> {
         let mut device_type = ffi::OrtMemoryInfoDeviceType::OrtMemoryInfoDeviceType_CPU;
         call_api!(MemoryInfoGetDeviceType, self.inner(), &mut device_type);
         Ok(device_type)
     }
 
+    /// check if two OrtMemoryInfo is equal
     fn equal(&self, other: &impl MemoryInfoTrait) -> Result<bool> {
         let mut equal = 0;
         rc(call_api!(
@@ -356,6 +364,7 @@ pub trait MemoryInfoTrait {
     }
 }
 
+/// `OrtMemoryInfo` as `OrtValue` property will drop after `OrtValue` dropped
 #[derive(Debug)]
 pub struct ConstMemoryInfo {
     pub inner: *const ffi::OrtMemoryInfo,
@@ -367,6 +376,7 @@ impl MemoryInfoTrait for ConstMemoryInfo {
     }
 }
 
+/// `OrtMemoryInfo` created by `CreateCpuMemoryInfo` or `CreateMemoryInfo`
 #[derive(Debug)]
 pub struct MemoryInfo {
     pub inner: *mut ffi::OrtMemoryInfo,
@@ -413,6 +423,7 @@ impl Drop for MemoryInfo {
     }
 }
 
+/// `OrtAllocator` trait
 pub trait AllocatorTrait: std::fmt::Debug {
     fn inner(&self) -> *mut ffi::OrtAllocator;
 
@@ -421,10 +432,14 @@ pub trait AllocatorTrait: std::fmt::Debug {
     }
 }
 
+/// `OrtAllocator` created by `GetAllocatorWithDefaultOptions` should not be dropped
 #[derive(Debug)]
 pub struct AllocatorDefault {
     pub inner: *mut ffi::OrtAllocator,
 }
+
+unsafe impl Sync for AllocatorDefault {}
+unsafe impl Send for AllocatorDefault {}
 
 impl AllocatorTrait for AllocatorDefault {
     fn inner(&self) -> *mut ffi::OrtAllocator {
@@ -432,38 +447,36 @@ impl AllocatorTrait for AllocatorDefault {
     }
 }
 
-impl Drop for AllocatorDefault {
-    fn drop(&mut self) {
-        trace!("dropping {:?}", self);
-    }
-}
-
+/// `OrtAllocator` created by `GetAllocatorWithDefaultOptions`
 impl AllocatorDefault {
     pub fn new() -> Result<Self> {
         let mut inner = null_mut();
         rc(call_api!(GetAllocatorWithDefaultOptions, &mut inner))?;
-        let r= Ok(AllocatorDefault { inner });
-        trace!(?r, "created");
+        let r = Ok(AllocatorDefault { inner });
         r
     }
 }
 
+/// `OrtAllocator` created by `CreateAllocator`
 #[derive(Debug)]
 pub struct AllocatorSession<'a> {
     pub inner: *mut ffi::OrtAllocator,
     pub session: &'a Session,
 }
 
+unsafe impl<'a> Sync for AllocatorSession<'a> {}
+unsafe impl<'a> Send for AllocatorSession<'a> {}
+
 impl<'a> AllocatorSession<'a> {
-    pub fn new(memory_info: &MemoryInfo, session: &'a Session) -> Result<Self> {
+    pub fn new(memory_info: &impl MemoryInfoTrait, session: &'a Session) -> Result<Self> {
         let mut inner = null_mut();
         rc(call_api!(
             CreateAllocator,
             session.inner,
-            memory_info.inner,
+            memory_info.inner(),
             &mut inner
         ))?;
-        let r= Ok(AllocatorSession { inner, session });
+        let r = Ok(AllocatorSession { inner, session });
         trace!(?r, "created");
         r
     }
@@ -476,14 +489,18 @@ impl Drop for AllocatorSession<'_> {
     }
 }
 
+/// `OrtValue` allocated by `OrtAllocator`
 #[derive(Debug)]
 pub struct ValueAllocated<'a, A>
 where
     A: AllocatorTrait,
 {
     pub inner: *mut ffi::OrtValue,
-    pub _allocator: PhantomData<&'a A>,
+    pub _allocator: &'a A,
 }
+
+unsafe impl<'a> Sync for ValueAllocated<'a, AllocatorDefault> {}
+unsafe impl<'a> Send for ValueAllocated<'a, AllocatorDefault> {}
 
 impl<'a, A> ValueTrait for ValueAllocated<'a, A>
 where
@@ -515,7 +532,7 @@ where
         ))?;
         Ok(ValueAllocated {
             inner,
-            _allocator: PhantomData,
+            _allocator: allocator,
         })
     }
 }
@@ -531,6 +548,7 @@ where
 }
 
 #[cfg(feature = "cuda")]
+/// cuda api to copy memory between host and device
 pub mod cuda {
     use crate::error::*;
     use ortn_sys as ffi;

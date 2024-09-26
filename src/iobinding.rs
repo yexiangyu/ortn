@@ -1,29 +1,36 @@
 use crate::error::{rc, Result};
 use crate::macros::call_api;
 use crate::session::Session;
-use crate::value::{AllocatorTrait, MemoryInfo, ValueAllocated, ValueTrait, ValueView};
+use crate::value::{
+    AllocatorDefault, AllocatorTrait, MemoryInfo, ValueAllocated, ValueBorrowed, ValueTrait,
+    ALLOCATOR_DEFAULT,
+};
+
 use std::marker::PhantomData;
 use std::ptr::null_mut;
 
-use itertools::Itertools;
 use ortn_sys as ffi;
-use tracing::trace;
-use std::ffi::c_void;
+use tracing::*;
 
-
+/// `OrtIoBinding` wrapper
 #[derive(Debug)]
 pub struct IoBinding<'a> {
     pub inner: *mut ffi::OrtIoBinding,
     pub session: &'a Session,
 }
 
+unsafe impl<'a> Send for IoBinding<'a> {}
+unsafe impl<'a> Sync for IoBinding<'a> {}
+
 impl<'a> IoBinding<'a> {
+    /// Create a new `IoBinding` for the given session.
     pub fn new(session: &'a Session) -> Result<Self> {
         let mut inner = null_mut();
         rc(call_api!(CreateIoBinding, session.inner, &mut inner))?;
         Ok(IoBinding { inner, session })
     }
 
+    /// Bind an input tensor to the binding.
     pub fn bind_input(&mut self, index: usize, value: &mut impl ValueTrait) -> Result<()> {
         let input = &self.session.inputs[index];
         rc(call_api!(
@@ -35,6 +42,7 @@ impl<'a> IoBinding<'a> {
         Ok(())
     }
 
+    /// Bind multiple input tensors to the binding.
     pub fn bind_inputs<T>(&mut self, mut inputs: impl AsMut<[T]>) -> Result<()>
     where
         T: ValueTrait,
@@ -45,6 +53,7 @@ impl<'a> IoBinding<'a> {
         Ok(())
     }
 
+    /// Bind an output tensor to the binding.
     pub fn bind_output(&mut self, index: usize, value: &mut impl ValueTrait) -> Result<()> {
         let output = &self.session.outputs[index];
         rc(call_api!(
@@ -56,6 +65,7 @@ impl<'a> IoBinding<'a> {
         Ok(())
     }
 
+    /// Bind multiple output tensors to the binding.
     pub fn bind_outputs<T>(&mut self, mut outputs: impl AsMut<[T]>) -> Result<()>
     where
         T: ValueTrait,
@@ -66,6 +76,7 @@ impl<'a> IoBinding<'a> {
         Ok(())
     }
 
+    /// Bind an output tensor to the device, when output shape is not fixed,
     pub fn bind_output_to_device(&mut self, index: usize, memory_info: &MemoryInfo) -> Result<()> {
         let output = &self.session.outputs[index];
         rc(call_api!(
@@ -77,46 +88,89 @@ impl<'a> IoBinding<'a> {
         Ok(())
     }
 
+    /// Bind multiple output tensors to the device, when output shape is not fixed.
     pub fn bind_outputs_to_device(&mut self, memory_info: &MemoryInfo) -> Result<()> {
         for i in 0..self.session.outputs.len() {
             self.bind_output_to_device(i, memory_info)?;
         }
         Ok(())
     }
+    /// clear outputs of binding
+    pub fn clear_outputs(&mut self) {
+        call_api!(ClearBoundOutputs, self.inner)
+    }
 
-    pub fn outputs<'b, 'c, A>(
+    /// clear inputs of binding
+    pub fn clear_inputs(&mut self) {
+        call_api!(ClearBoundInputs, self.inner);
+    }
+
+    /// Get the outputs from the binding with default allocator.
+    pub fn get_outputs<'b>(
         &'b self,
-        allocator: &'a A,
-    ) -> Result<Vec<ValueAllocated<'a, A>>>
-    where
-        A: AllocatorTrait,
-    {
+    ) -> Result<IoBindingOutputs<'b, 'a, 'static, AllocatorDefault>> {
         let mut count = 0;
-        let mut values = null_mut();
+        let mut inner = null_mut();
 
         rc(call_api!(
             GetBoundOutputValues,
             self.inner,
-            allocator.inner(),
-            &mut values,
+            ALLOCATOR_DEFAULT.inner(),
+            &mut inner,
             &mut count
         ))?;
 
-        let r =  (0..count)
+        let outputs = (0..count)
             .map(|n| {
-                let inner = *unsafe { values.add(n).as_ref().expect("failed to get value") };
-                let value_ = ValueView::<IoBinding> {
+                let inner = *unsafe { inner.add(n).as_ref().expect("failed to get value") };
+                let value = ValueBorrowed::<IoBinding> {
                     inner,
                     _marker: PhantomData,
-                }.clone_with_allocator(allocator)?;
-                Ok(value_)
+                };
+                Ok(value)
             })
             .collect::<Result<Vec<_>>>()?;
 
-        allocator.free(values);
+        Ok(IoBindingOutputs {
+            inner,
+            values: outputs,
+            allocator: &*ALLOCATOR_DEFAULT,
+        })
+    }
+}
 
-        Ok(r)
+#[derive(Debug)]
+pub struct IoBindingOutputs<'a, 'b, 'c, A>
+where
+    A: AllocatorTrait,
+{
+    pub inner: *mut *mut ffi::OrtValue,
+    pub values: Vec<ValueBorrowed<'a, IoBinding<'b>>>,
+    pub allocator: &'c A,
+}
 
+impl<'a, 'b, 'c, A> IoBindingOutputs<'a, 'b, 'c, A>
+where
+    A: AllocatorTrait,
+{
+    pub fn to_vec(&self) -> Result<Vec<ValueAllocated<'static, AllocatorDefault>>> {
+        self.values.iter().map(|v| v.clone_host()).collect()
+    }
+
+    pub fn values(&self) -> &[ValueBorrowed<'a, IoBinding<'b>>] {
+        &self.values
+    }
+}
+
+impl<'a, 'b, 'c, A> Drop for IoBindingOutputs<'a, 'b, 'c, A>
+where
+    A: AllocatorTrait,
+{
+    fn drop(&mut self) {
+        trace!(?self, "dropping");
+        let values = std::mem::take(&mut self.values);
+        drop(values);
+        self.allocator.free(self.inner);
     }
 }
 

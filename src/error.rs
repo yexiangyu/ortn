@@ -1,5 +1,5 @@
-use ortn_sys as ffi;
 use crate::macros::call_api;
+use ortn_sys as ffi;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -19,7 +19,7 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-pub fn rc(status: *mut ffi::OrtStatus) -> Result<()> {
+pub(crate) fn rc(status: *mut ffi::OrtStatus) -> Result<()> {
     if status.is_null() {
         return Ok(());
     }

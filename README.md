@@ -64,7 +64,7 @@ let output = Session::builder()
     .run([
 
         // convert input tensor to ValueView
-        ValueView::try_from(
+        ValueBorrowed::try_from(
 
             // create random input tensor
             Array4::random([1, 1, 28, 28], Uniform::new(0., 1.)).view(),

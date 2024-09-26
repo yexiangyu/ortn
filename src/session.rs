@@ -1,12 +1,13 @@
 use std::ffi::{CStr, CString};
 use std::ptr::{null, null_mut};
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::environment::Environment;
 use crate::error::*;
 use crate::iobinding::IoBinding;
 use crate::macros::call_api;
-use crate::value::{AllocatorDefault, ValueOutput, ValueTrait};
+use crate::value::{AllocatorDefault, ValueBorrowed, ValueTrait};
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use ortn_sys as ffi;
@@ -21,14 +22,14 @@ lazy_static! {
     );
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TensorShapeInfo {
     pub name: CString,
     pub dims: Vec<i64>,
     pub data_type: ffi::ONNXTensorElementDataType,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Session {
     pub inner: *mut ffi::OrtSession,
     pub inputs: Vec<TensorShapeInfo>,
@@ -52,14 +53,17 @@ impl Session {
     }
 
     pub fn run_with_iobinding(&self, io: &mut IoBinding) -> Result<()> {
+        let tm = Instant::now();
         rc(call_api!(RunWithBinding, self.inner, null(), io.inner))?;
+        trace!("run with binding {:?} delta={:?}", io, tm.elapsed());
         Ok(())
     }
 
-    pub fn run<T>(&self, inputs: impl AsRef<[T]>) -> Result<Vec<ValueOutput>>
+    pub fn run<T>(&self, inputs: impl AsRef<[T]>) -> Result<Vec<ValueBorrowed<Session>>>
     where
         T: ValueTrait,
     {
+        let tm = Instant::now();
         let inputs = inputs
             .as_ref()
             .iter()
@@ -79,10 +83,15 @@ impl Session {
             output_names.len(),
             outputs.as_mut_ptr()
         ))?;
-        Ok(outputs
+        let res = Ok(outputs
             .into_iter()
-            .map(|inner| ValueOutput::new(inner, self))
-            .collect_vec())
+            .map(|inner| ValueBorrowed {
+                inner,
+                _marker: std::marker::PhantomData,
+            })
+            .collect_vec());
+        trace!(?inputs, ?res, "run, delta={:?}", tm.elapsed());
+        res
     }
 
     fn update_inputs(&mut self) -> Result<()> {
@@ -375,6 +384,8 @@ impl SessionBuilder {
 
         session.update_inputs()?;
         session.update_outputs()?;
+
+        trace!(?session, "create");
 
         Ok(session)
     }

@@ -3,11 +3,12 @@ use std::ptr::null_mut;
 use tracing::*;
 
 // use crate::api::API;
-use crate::macros::call_api;
 use crate::error::*;
+use crate::macros::call_api;
 use ortn_sys as ffi;
 use smart_default::SmartDefault;
 
+/// `OrtEnv` wrapper
 #[derive(Debug)]
 pub struct Environment {
     inner: *mut ffi::OrtEnv,
@@ -15,7 +16,6 @@ pub struct Environment {
 
 unsafe impl Send for Environment {}
 unsafe impl Sync for Environment {}
-
 
 impl Environment {
     pub fn builder() -> EnvironmentBuilder {
@@ -31,14 +31,12 @@ impl Environment {
     }
 }
 
-impl Drop for Environment
-{
+impl Drop for Environment {
     fn drop(&mut self) {
         trace!("dropping {:?}", self);
         call_api!(ReleaseEnv, self.inner);
     }
 }
-
 
 #[derive(SmartDefault)]
 pub struct EnvironmentBuilder {
@@ -58,6 +56,20 @@ impl EnvironmentBuilder {
         self.name = name.to_string();
         self
     }
+
+    pub fn build(self) -> Result<Environment> {
+        let mut inner = null_mut();
+        let name = std::ffi::CString::new(self.name.as_bytes())?;
+        call_api!(
+            CreateEnvWithCustomLogger,
+            Some(logging_function),
+            null_mut(),
+            self.logging_level,
+            name.as_ptr(),
+            &mut inner
+        );
+        Ok(Environment { inner })
+    }
 }
 
 #[allow(improper_ctypes_definitions)]
@@ -74,20 +86,21 @@ unsafe extern "C" fn logging_function(
     let code_location = CStr::from_ptr(code_location);
     let message = CStr::from_ptr(message);
     match severity {
-        ffi::OrtLoggingLevel::ORT_LOGGING_LEVEL_VERBOSE => trace!(?category, ?logid, ?code_location, ?message),
-        ffi::OrtLoggingLevel::ORT_LOGGING_LEVEL_INFO => trace!(?category, ?logid, ?code_location, ?message),
-        ffi::OrtLoggingLevel::ORT_LOGGING_LEVEL_WARNING => warn!(?category, ?logid, ?code_location, ?message),
-        ffi::OrtLoggingLevel::ORT_LOGGING_LEVEL_ERROR => error!(?category, ?logid, ?code_location, ?message),
-        ffi::OrtLoggingLevel::ORT_LOGGING_LEVEL_FATAL => error!(?category, ?logid, ?code_location, ?message),
+        ffi::OrtLoggingLevel::ORT_LOGGING_LEVEL_VERBOSE => {
+            trace!(?category, ?logid, ?code_location, ?message)
+        }
+        ffi::OrtLoggingLevel::ORT_LOGGING_LEVEL_INFO => {
+            trace!(?category, ?logid, ?code_location, ?message)
+        }
+        ffi::OrtLoggingLevel::ORT_LOGGING_LEVEL_WARNING => {
+            warn!(?category, ?logid, ?code_location, ?message)
+        }
+        ffi::OrtLoggingLevel::ORT_LOGGING_LEVEL_ERROR => {
+            error!(?category, ?logid, ?code_location, ?message)
+        }
+        ffi::OrtLoggingLevel::ORT_LOGGING_LEVEL_FATAL => {
+            error!(?category, ?logid, ?code_location, ?message)
+        }
         _ => todo!(),
-    }
-}
-
-impl EnvironmentBuilder {
-    pub fn build(self) -> Result<Environment> {
-        let mut inner = null_mut();
-        let name = std::ffi::CString::new(self.name.as_bytes())?;
-        call_api!(CreateEnvWithCustomLogger, Some(logging_function), null_mut(), self.logging_level, name.as_ptr(), &mut inner);    
-        Ok(Environment { inner })
     }
 }

@@ -26,12 +26,10 @@ fn main() {
     println!("cargo::rustc-link-search={}", ort_lib_dir);
     println!("cargo::rustc-link-lib=onnxruntime");
 
-
     let mut cuda_dir = "/usr/local/cuda/".to_string();
 
     #[cfg(feature = "cuda")]
     {
-
         if let Some(cuda_dir_env) = std::env::var_os("CUDA_DIR") {
             cuda_dir = cuda_dir_env.to_str().unwrap().to_string();
         }
@@ -39,7 +37,6 @@ fn main() {
         println!("cargo::rustc-link-search={}/lib64", cuda_dir);
         println!("cargo::rustc-link-lib=cudart");
     }
-
 
     #[cfg(not(feature = "bindgen"))]
     {
@@ -67,7 +64,11 @@ fn main() {
         .clang_arg(format!("-I{}", ort_inc_dir))
         .generate()
         .expect("could not generate bindings")
-        .write_to_file(format!("{}/src/ffi/{}", env!("CARGO_MANIFEST_DIR"), bind_output))
+        .write_to_file(format!(
+            "{}/src/ffi/{}",
+            env!("CARGO_MANIFEST_DIR"),
+            bind_output
+        ))
         .expect("could not write bindings");
 
     #[cfg(feature = "cuda")]
@@ -76,6 +77,7 @@ fn main() {
     }
 }
 
+#[allow(unused)]
 fn gen_cuda_binding(cuda_dir: String) {
     let header = format!("{}/include/cuda_runtime.h", cuda_dir);
 
@@ -87,6 +89,10 @@ fn gen_cuda_binding(cuda_dir: String) {
         .clang_arg(format!("-I{}/include", cuda_dir))
         .generate()
         .expect("could not generate bindings")
-        .write_to_file(format!("{}/src/ffi/{}", env!("CARGO_MANIFEST_DIR"), "cuda.rs"))
+        .write_to_file(format!(
+            "{}/src/ffi/{}",
+            env!("CARGO_MANIFEST_DIR"),
+            "cuda.rs"
+        ))
         .expect("could not write bindings");
 }

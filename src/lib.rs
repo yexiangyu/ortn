@@ -1,10 +1,11 @@
 #![doc = include_str!("../README.md")]
 
 pub(crate) mod api;
+pub(crate) mod macros;
+
 pub mod environment;
 pub mod error;
 pub mod iobinding;
-pub(crate) mod macros;
 pub mod session;
 pub mod value;
 
@@ -15,7 +16,7 @@ pub mod prelude {
     pub use super::session::Session;
     pub use super::value::{
         AllocatorDefault, AllocatorSession, AllocatorTrait, AsONNXTensorElementDataTypeTrait,
-        MemoryInfo, ValueTrait, ValueView,
+        ConstMemoryInfo, MemoryInfo, MemoryInfoTrait, ValueBorrowed, ValueTrait,
     };
     #[cfg(feature = "cuda")]
     pub use ortn_sys::cuda::{cudaError, cudaMemcpyKind};
@@ -24,107 +25,96 @@ pub mod prelude {
     };
 }
 
-#[allow(unused)]
 #[cfg(test)]
-// #[test]
-fn test_demo_code() -> error::Result<()> {
+#[test]
+fn test_onnxruntime_run_ok() -> error::Result<()> {
     use ndarray::Array4;
     use ndarray_rand::{rand_distr::Uniform, RandomExt};
     use prelude::*;
     let _ = dotenv::dotenv();
-    std::env::set_var("RUST_LOG", "trace");
-
     let _ = tracing_subscriber::fmt::try_init();
 
-    let output = Session::builder()
-        // create env and use it as session's env
-        .with_env(
-            Environment::builder()
-                .with_name("minst")
-                .with_level(OrtLoggingLevel::ORT_LOGGING_LEVEL_VERBOSE)
-                .build()?,
-        )
-        // use cuda
-        // .with_use_tensor_rt(true)
-        // disable all optimization
-        .with_graph_optimization_level(GraphOptimizationLevel::ORT_DISABLE_ALL)
-        // set session intra threads to 4
-        .with_intra_threads(4)
-        // build model
-        .build(include_bytes!("../models/mnist.onnx"))?
-        // run model
-        .run([
-            // convert input tensor to ValueView
-            ValueView::try_from(
-                // create random input tensor
-                Array4::random([1, 1, 28, 28], Uniform::new(0., 1.)).view(),
-            )?,
-        ])?
-        // output is a vector
-        .into_iter()
-        // get first output
-        .next()
-        .unwrap()
-        // view output as a f32 array
-        .view::<f32>()?
-        // the output is owned by session, copy it out as a owned tensor/ndarray
-        .to_owned();
+    // prepare input
+    let inp = Array4::random([1, 1, 28, 28], Uniform::new(0., 1.));
+    let inp = inp.view();
+    let inp = ValueBorrowed::try_from(inp)?;
 
-    tracing::info!(?output);
+    #[allow(unused_mut)]
+    let mut builder = Session::builder()
+        .with_env(Environment::builder().with_name("minst").build()?)
+        .with_graph_optimization_level(GraphOptimizationLevel::ORT_ENABLE_ALL)
+        .with_intra_threads(4);
+
+    #[cfg(feature = "cuda")]
+    {
+        builder = builder.with_use_tensor_rt(true).with_cuda_device(0);
+    }
+
+    let session = builder.build(include_bytes!("../models/mnist.onnx"))?;
+
+    let out = session.run([inp])?.into_iter().next().expect("no output?");
+
+    let out = match out.view::<f32>() {
+        Ok(v) => v.to_owned(),
+        Err(_) => out.clone_host()?.view::<f32>()?.to_owned(),
+    };
+    tracing::info!(?out);
 
     Ok(())
 }
 
-#[allow(unused)]
 #[cfg(test)]
 #[test]
-fn test_demo_code_iobinding() -> error::Result<()> {
-    use ndarray::{Array2, Array4};
+fn test_onnxruntime_run_with_iobinding_ok() -> error::Result<()> {
+    use ndarray::Array4;
     use ndarray_rand::{rand_distr::Uniform, RandomExt};
     use prelude::*;
-    use value::ValueAllocated;
-
     let _ = dotenv::dotenv();
-
-    std::env::set_var("RUST_LOG", "trace");
-
     let _ = tracing_subscriber::fmt::try_init();
 
-    let session = Session::builder()
-        // create env and use it as session's env
-        .with_env(
-            Environment::builder()
-                .with_name("minst")
-                .with_level(OrtLoggingLevel::ORT_LOGGING_LEVEL_ERROR)
-                .build()?,
-        )
-        // use cuda
-        .with_use_tensor_rt(true)
-        // disable all optimization
-        .with_graph_optimization_level(GraphOptimizationLevel::ORT_DISABLE_ALL)
-        // set session intra threads to 4
-        .with_intra_threads(4)
-        // build model
-        .build(include_bytes!("../models/mnist.onnx"))?;
+    // prepare input
+    let inp = Array4::random([1, 1, 28, 28], Uniform::new(0., 1.));
+    let inp = inp.view();
+    let inp = ValueBorrowed::try_from(inp)?;
 
-    let input = Array4::random([1, 1, 28, 28], Uniform::new(0., 1.));
-    let mut input = ValueView::try_from(input.view())?;
+    #[allow(unused_mut)]
+    let mut builder = Session::builder()
+        .with_env(Environment::builder().with_name("minst").build()?)
+        .with_graph_optimization_level(GraphOptimizationLevel::ORT_ENABLE_ALL)
+        .with_intra_threads(4);
 
-    let cpu_allocator = AllocatorDefault::new()?;
-    let cuda_memory_info = MemoryInfo::new_cuda(0)?;
+    #[cfg(feature = "cuda")]
+    {
+        builder = builder.with_use_tensor_rt(true).with_cuda_device(0);
+    }
 
-    let mut io_binding = IoBinding::new(&session)?;
+    let session = builder.build(include_bytes!("../models/mnist.onnx"))?;
 
-    io_binding.bind_input(0, &mut input)?;
-    io_binding.bind_output_to_device(0, &cuda_memory_info)?;
+    let mut iobinding = IoBinding::new(&session)?;
+    iobinding.bind_inputs([inp])?;
 
-    session.run_with_iobinding(&mut io_binding)?;
+    #[allow(unused_mut)]
+    let mut mem_info = MemoryInfo::new_cpu()?;
 
-    let output = io_binding.outputs(&cpu_allocator)?.into_iter().next().unwrap();
+    #[cfg(feature = "cuda")]
+    {
+        mem_info = MemoryInfo::new_cuda(0)?;
+    }
 
-    let output = output.view::<f32>()?;
+    iobinding.bind_outputs_to_device(&mem_info)?;
 
-    tracing::info!(?output);
+    session.run_with_iobinding(&mut iobinding)?;
+
+    let outputs = iobinding.get_outputs()?;
+
+    let out = outputs.values().get(0).unwrap();
+
+    let out = match out.view::<f32>() {
+        Ok(v) => v.to_owned(),
+        Err(_) => out.clone_host()?.view::<f32>()?.to_owned(),
+    };
+
+    tracing::info!(?out);
 
     Ok(())
 }
