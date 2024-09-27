@@ -85,7 +85,7 @@ fn test_onnxruntime_run_with_iobinding_ok() -> error::Result<()> {
 
     #[cfg(feature = "cuda")]
     {
-        builder = builder.with_use_tensor_rt(true).with_cuda_device(0);
+        builder = builder.with_use_cuda(true).with_cuda_device(0);
     }
 
     let session = builder.build(include_bytes!("../models/mnist.onnx"))?;

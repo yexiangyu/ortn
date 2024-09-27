@@ -7,31 +7,37 @@ Yet another ***minimum*** `rust` binding for `onnxruntime` `c_api`, inspired by 
 - Only subset of `c_api` is wrapped, enough to run a onnx model.
 - Less `'a` lifetime generic...
 - Less concept overhead when use `rust` compare to use `onnxruntime` `c_api`.
-- ***Best effort*** to work with `latest` onnxruntime version on different platform, less `feature` flag introduced by multi-version of onnxruntime.
+- ***Best effort*** to work with `latest` onnxruntime version on different platform, ***NO*** `feature` flag introduced by multi-version of onnxruntime.
 - Only shared library (`onnxruntime.dll, libonnxruntime.[so|dyn])` supported.
+- `ndarray` is used to handle input/output tensor
 
 ## Test Matrix
 
 |   OS   | onnxuntime<br />version |  Arch  | CPU | CUDA | TensorRT | CANN |
 | :-----: | :---------------------: | :-----: | :--: | :--: | :------: | :--: |
-|   mac   |         1.19.2         | aarch64 |  ✅  | n/a |   n/a   | n/a |
-|   mac   |         1.19.2         | intel64 |  ✅  | n/a |   n/a   | n/a |
-|  linux  |         1.19.2         | intel64 |  ✅  |  ✅  |    ✅    | n/a |
-| windows |          TODO          | intel64 | TODO | TODO |   TODO   | TODO |
+|   mac   |         1.19.2         | aarch64 |  ✅  |  |         |  |
+|   mac   |         1.19.2         | intel64 |  ✅  |  |      |  |
+|  linux  |         1.19.2         | intel64 |  ✅  |  ✅  |    ✅    | TODO |
+| windows |          TODO          | intel64 | TODO | TODO |   TODO   |  |
 
 ## Getting Started
 
-1. please download [`onnxruntime`](https://github.com/microsoft/onnxruntime) first, unzip, or build it from source. Binary downloaded from [release page](https://github.com/microsoft/onnxruntime/releases) is not signed, take care of it.
+1. please download [`onnxruntime`](https://github.com/microsoft/onnxruntime) first, unzip, or build it from source. 
 
 2. before start everything, setup environment variable to help `ortn` to find `header` or `libraries` needed.
 
-- `ORT_LIB_DIR`: folder where `libonnxruntime.[so|dylib]` or `onnxruntime.dll` located
-- `ORT_INC_DIR`: folder where header file: `onnxruntime/onnxruntime_c_api.h` located
-- `DYLD_LIBRARY_PATH`: (mac only) folder where `libonnxruntime.dylib` located
-- `LD_LIBRARY_PATH`: (linux only) folder where `libonnxruntime.so` located
-- `PATH`: (windows only) folder where `onnxruntime.dll` located
+- `ORT_LIB_DIR`: 
+  - folder where `libonnxruntime.[so|dylib]` or `onnxruntime.dll` located
+- `ORT_INC_DIR`: 
+  - folder where header file: `onnxruntime/onnxruntime_c_api.h` located
+- `DYLD_LIBRARY_PATH`: 
+  - (mac only) folder where `libonnxruntime.dylib` located
+- `LD_LIBRARY_PATH`: 
+  - (linux only) folder where `libonnxruntime.so` located
+- `PATH`: 
+  - folder where `onnxruntime.dll` located
 
-3. build environment, build session, run session
+1. build environment, build session, run session
 
 ```rust
 use ndarray::Array4;
