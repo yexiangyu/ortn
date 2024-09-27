@@ -1,9 +1,14 @@
 [workspace]
 members = ["ortn-sys"]
+
 [package]
 name = "ortn"
 version = "1.19.2"
 edition = "2021"
+authors = ["Xiangyu Ye <yexiangyu@gmail.com>"]
+description = "Rust bindings for ONNXRuntime"
+license = "MIT"
+
 
 [features]
 default = []
