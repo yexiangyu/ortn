@@ -26,6 +26,7 @@ fn main() {
     println!("cargo::rustc-link-search={}", ort_lib_dir);
     println!("cargo::rustc-link-lib=onnxruntime");
 
+    #[allow(unused)]
     let mut cuda_dir = "/usr/local/cuda/".to_string();
 
     #[cfg(feature = "cuda")]
@@ -78,7 +79,7 @@ fn main() {
 }
 
 #[allow(unused)]
-fn gen_cuda_binding(cuda_dir: String) {
+fn gen_cuda_binding(cuda_dir: &str, triplet: &str) {
     let header = format!("{}/include/cuda_runtime.h", cuda_dir);
 
     bindgen::builder()
@@ -90,9 +91,9 @@ fn gen_cuda_binding(cuda_dir: String) {
         .generate()
         .expect("could not generate bindings")
         .write_to_file(format!(
-            "{}/src/ffi/{}",
+            "{}/src/ffi/cuda-{}.rs",
             env!("CARGO_MANIFEST_DIR"),
-            "cuda.rs"
+            triplet
         ))
         .expect("could not write bindings");
 }

@@ -18,37 +18,42 @@ lazy_static! {
 }
 
 pub trait ONNXTensorElementDataTypeSizeTrait {
-    fn size(&self) -> usize;
+    fn size_of_n(&self, n: usize) -> usize;
+    fn size_of_bit(&self) -> usize;
 }
 
 impl ONNXTensorElementDataTypeSizeTrait for ONNXTensorElementDataType {
-    fn size(&self) -> usize {
+    fn size_of_bit(&self) -> usize {
         match self {
-            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT => 4,
-            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32 => 4,
-            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64 => 8,
-            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8 => 1,
-            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8 => 1,
-            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT16 => 2,
-            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT16 => 2,
-            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_STRING => 1,
-            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_BOOL => 1,
-            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16 => 2,
-            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_DOUBLE => 8,
-            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT32 => 4,
-            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT64 => 8,
-            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_COMPLEX64 => 8,
-            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_COMPLEX128 => 16,
-            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_BFLOAT16 => 2,
-            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT8E4M3FN => 1,
-            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT8E4M3FNUZ => 1,
-            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT8E5M2 => 1,
-            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT8E5M2FNUZ => 1,
-            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT4 => 0, //WTF?
-            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT4 => 0,  //WTF?
-            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_UNDEFINED => todo!(),
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_UNDEFINED => 0,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT => 4 * 8,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8 => 1 * 8,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8 => 1 * 8,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT16 => 2 * 16,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT16 => 2 * 16,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32 => 4 * 8,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64 => 8 * 8,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_STRING => 0 * 8,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_BOOL => 1 * 8,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16 => 2 * 8,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_DOUBLE => 8 * 8,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT32 => 4 * 8,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT64 => 8 * 8,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_COMPLEX64 => 2 * 4 * 8,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_COMPLEX128 => 2 * 8 * 8,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_BFLOAT16 => 2 * 8,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT8E4M3FN => 1 * 8,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT8E4M3FNUZ => 1 * 8,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT8E5M2 => 1 * 8,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT8E5M2FNUZ => 1 * 8,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT4 => 1 * 4,
+            ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT4 => 1 * 4,
             _ => todo!(),
         }
+    }
+
+    fn size_of_n(&self, n: usize) -> usize {
+        (self.size_of_bit() as f64 * n as f64 / 8.0).ceil() as usize
     }
 }
 
@@ -124,7 +129,8 @@ pub trait ValueTrait {
         let typ = shape_info.data_type;
         let dims = shape_info.dims;
         let n_elements = dims.iter().fold(1, |acc, d| acc * d) as usize;
-        let size = n_elements * typ.size();
+
+        let size = typ.size_of_n(n_elements);
 
         let mem_info_lhs = self.mem_info()?;
         let mem_info_rhs = rhs.mem_info()?;
