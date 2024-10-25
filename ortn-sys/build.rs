@@ -49,7 +49,7 @@ fn main() {
 
     let triplet = format!("{}-{}", TARGET_ARCH, TARGET_OS);
 
-    let bind_output = triplet + ".rs";
+    let bind_output = triplet.clone() + ".rs";
 
     let mut header = format!("{}/onnxruntime/onnxruntime_c_api.h", ort_inc_dir);
 
@@ -70,11 +70,11 @@ fn main() {
             env!("CARGO_MANIFEST_DIR"),
             bind_output
         ))
-        .expect("could not write bindings");
+        .expect("failed to write bindings");
 
     #[cfg(feature = "cuda")]
     {
-        gen_cuda_binding(cuda_dir);
+        gen_cuda_binding(&cuda_dir, &triplet);
     }
 }
 

@@ -14,5 +14,5 @@ include!("ffi/x86_64-linux.rs");
 
 #[cfg(all(feature = "cuda", target_os = "linux"))]
 pub mod cuda {
-    include!("ffi/cuda-x64_64-linux.rs");
+    include!("ffi/cuda-x86_64-linux.rs");
 }
